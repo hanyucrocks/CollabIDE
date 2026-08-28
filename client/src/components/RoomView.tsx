@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { inviteUrl } from '../lib/invite.ts';
 import { api, type Room } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { colorForUser, useCollabDoc, type Identity } from '../lib/useCollabDoc.ts';
@@ -17,6 +18,22 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
 
   const { ydoc, provider, status, synced } = useCollabDoc(roomId, tokenVersion, identity);
   const peers = useOnlinePeers(provider);
+  const [copied, setCopied] = useState(false);
+
+  const copyInvite = () => {
+    if (!room?.inviteToken) return;
+    // Clipboard access can be refused; the link is on screen either way.
+    void navigator.clipboard
+      .writeText(inviteUrl(room.inviteToken))
+      .then(() => setCopied(true))
+      .catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,16 +94,14 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
       {room?.inviteToken && (
         <div className="card invite">
           <div>
-            <strong>Invite token</strong>
-            <p className="muted">Share this so a second user can join this room.</p>
+            <strong>Invite link</strong>
+            <p className="muted">
+              Anyone with this link can open the room, signing up first if they need to.
+            </p>
           </div>
-          <code>{room.inviteToken}</code>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => void navigator.clipboard.writeText(room.inviteToken as string)}
-          >
-            Copy
+          <code>{inviteUrl(room.inviteToken)}</code>
+          <button type="button" className="secondary" onClick={copyInvite}>
+            {copied ? 'Copied' : 'Copy link'}
           </button>
         </div>
       )}

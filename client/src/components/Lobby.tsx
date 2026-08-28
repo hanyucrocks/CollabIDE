@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, type Room } from '../lib/api.ts';
+import { parseInviteToken } from '../lib/invite.ts';
 import { useAuth } from '../lib/auth.tsx';
 
 const LANGUAGES = ['javascript', 'python', 'cpp', 'java'];
@@ -46,7 +47,7 @@ export function Lobby({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) 
   const join = (event: FormEvent) => {
     event.preventDefault();
     void guard(async () => {
-      const room = await api.joinRoom(inviteToken.trim());
+      const room = await api.joinRoom(parseInviteToken(inviteToken));
       setInviteToken('');
       await reload();
       onOpenRoom(room.id);
@@ -97,11 +98,11 @@ export function Lobby({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) 
         <form className="card" onSubmit={join}>
           <h2>Join a room</h2>
           <label>
-            Invite token
+            Invite link
             <input
               value={inviteToken}
               onChange={(e) => setInviteToken(e.target.value)}
-              placeholder="Paste the token the owner shared"
+              placeholder="Paste the link the owner shared"
               required
             />
           </label>
