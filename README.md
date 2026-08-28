@@ -6,10 +6,10 @@ cursors.
 
 **Week 1 (done):** auth, rooms, JWT-gated Yjs WebSocket sync, plain `<textarea>`.
 **Week 2 (in progress):** Monaco + y-monaco, presence/cursors via Yjs awareness,
-binary snapshot persistence.
+binary snapshot persistence, server-side `viewer` enforcement.
 
-Still absent, by design: `viewer` role enforcement, Judge0 execution, rate
-limiting, deployment.
+Still absent, by design: permissions UI, Judge0 execution, rate limiting,
+deployment.
 
 ## Layout
 
@@ -136,6 +136,23 @@ treated as theft and drops every session for that user.
 is verified *before* the connection is accepted. Membership is checked too, not
 just token validity — otherwise any logged-in user could sync any room.
 
+**Roles.** `PATCH /api/rooms/:id/members/:userId` lets the owner move a member
+between `editor` and `viewer`. Owners are excluded: demoting one would leave the
+room unmanageable, and ownership transfer is a separate operation that does not
+exist yet.
+
+Enforcement is at the protocol level in `server/src/ws/readonly.ts`. A viewer's
+socket is filtered before `setupWSConnection` sees it, dropping sync step 2 and
+update frames while letting sync step 1 and awareness through — so a viewer
+still reads the document and still shows a cursor, but cannot change anything.
+The read-only Monaco instance on the client is a convenience; this is the
+control.
+
+A connection's role is resolved once, at handshake, so a role change closes the
+member's open sockets and lets the client reconnect with its new role. The close
+uses code 1000 on purpose: y-websocket treats 4400-4499 as permanent and would
+stop reconnecting.
+
 **Persistence.** `server/src/lib/persistence.ts`. One `doc_snapshots` row per
 room, holding `Y.encodeStateAsUpdate` output as a Buffer and updated in place;
 `version` is a monotonic save counter. Keeping only the current state is the
@@ -172,6 +189,8 @@ subsequent load await them.
 
 - **`inviteToken` is owner-only.** Editors and viewers do not receive it in API
   responses, so they cannot invite others.
+- **Joining always grants `editor`.** A viewer is created by the owner demoting
+  a member afterwards, not at join time.
 - **`GET /api/rooms`** (list your rooms) is not in the literal milestone list. It
   is included because without it a room id is only ever visible once, at creation.
 - **WS membership check** goes slightly beyond "reject handshake without valid
@@ -180,7 +199,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 26/26 against the live server, and the browser path was
+`npm run smoke` passes 35/35 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.
@@ -188,6 +207,10 @@ active.
 Persistence was additionally verified by restarting the server: content written
 2s before `SIGTERM` — inside the debounce window, so never written by the timer —
 came back intact, and a cold room rehydrated into Monaco from MongoDB.
+
+Viewer enforcement was checked from both ends: the suite asserts a viewer's edit
+reaches neither the other peer nor storage, and in the browser a demoted user's
+20 typed characters left the document unchanged.
 
 ### Reading Monaco's content in a test
 
@@ -211,7 +234,9 @@ These are scope boundaries, not bugs — each is a later week's work.
   the token is short-lived, which limits but does not remove the exposure.
 - **The refresh token is in `localStorage`**, so it is reachable by any XSS.
 - **No rate limiting** on any endpoint, including signup and login.
-- **`viewer` role is not enforced** on the socket. The editor is set read-only
-  for viewers client-side, which is a UI affordance, not a security control — a
-  viewer can still write through the WebSocket. Server-side enforcement is
-  outstanding Week 2 work.
+- **No permissions UI.** Role changes go through the API only; there is no
+  control in the room view yet.
+- **A blocked viewer write is dropped silently.** The viewer's own replica keeps
+  the local edit until it reconnects and resyncs. Since their editor is
+  read-only this needs a deliberate effort to reach, but the server does not
+  tell them their write was refused.

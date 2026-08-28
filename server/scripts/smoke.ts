@@ -354,6 +354,170 @@ async function main() {
     b.provider.destroy();
   }
 
+  console.log('\nWeek 2 — viewer role enforcement');
+
+  const viewRoom = (
+    await call('/api/rooms', {
+      method: 'POST',
+      body: { name: 'Roles', language: 'javascript' },
+      token: alice.accessToken,
+    })
+  ).body.room as Json;
+
+  await call('/api/rooms/join', {
+    method: 'POST',
+    body: { inviteToken: viewRoom.inviteToken },
+    token: bob.accessToken,
+  });
+
+  const bobId = bob.user.id as string;
+  const setRole = (role: string, token: string) =>
+    call(`/api/rooms/${viewRoom.id}/members/${bobId}`, {
+      method: 'PATCH',
+      body: { role },
+      token,
+    });
+
+  await test('a non-owner cannot change roles', async () => {
+    const { status } = await setRole('viewer', bob.accessToken);
+    assert.equal(status, 403);
+  });
+
+  await test('an invalid role is rejected', async () => {
+    const { status } = await setRole('superuser', alice.accessToken);
+    assert.equal(status, 400);
+  });
+
+  await test("the owner's own role cannot be changed", async () => {
+    const { status } = await call(
+      `/api/rooms/${viewRoom.id}/members/${alice.user.id}`,
+      { method: 'PATCH', body: { role: 'viewer' }, token: alice.accessToken },
+    );
+    assert.equal(status, 400);
+  });
+
+  await test('the owner can demote a member to viewer', async () => {
+    const { status, body } = await setRole('viewer', alice.accessToken);
+    assert.equal(status, 200);
+
+    const member = body.room.members.find((m: Json) => m.userId === bobId);
+    assert.equal(member.role, 'viewer');
+  });
+
+  await test('a viewer can still connect and read', async () => {
+    const owner = connect(viewRoom.id, alice.accessToken);
+    const viewer = connect(viewRoom.id, bob.accessToken);
+    try {
+      await Promise.all([
+        whenSynced(owner.provider, 'owner'),
+        whenSynced(viewer.provider, 'viewer'),
+      ]);
+
+      owner.text.insert(0, 'written by the owner\n');
+      await settle(700);
+
+      assert.equal(
+        viewer.text.toString(),
+        'written by the owner\n',
+        'a viewer must still receive updates',
+      );
+    } finally {
+      owner.provider.destroy();
+      viewer.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test("a viewer's writes never reach the document", async () => {
+    const owner = connect(viewRoom.id, alice.accessToken);
+    const viewer = connect(viewRoom.id, bob.accessToken);
+    try {
+      await Promise.all([
+        whenSynced(owner.provider, 'owner'),
+        whenSynced(viewer.provider, 'viewer'),
+      ]);
+
+      viewer.text.insert(0, 'SHOULD_NOT_PERSIST');
+      await settle(900);
+
+      assert.ok(
+        !owner.text.toString().includes('SHOULD_NOT_PERSIST'),
+        "the owner must not receive a viewer's edit",
+      );
+    } finally {
+      owner.provider.destroy();
+      viewer.provider.destroy();
+      await settle(1800);
+    }
+  });
+
+  await test("a viewer's rejected write is not persisted either", async () => {
+    // Read the room cold: proves the block held all the way to storage, not
+    // just between the two live peers above.
+    const checker = connect(viewRoom.id, alice.accessToken);
+    try {
+      await whenSynced(checker.provider, 'checker');
+      await settle(700);
+      assert.equal(checker.text.toString(), 'written by the owner\n');
+    } finally {
+      checker.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('demoting a connected member closes their live socket', async () => {
+    await setRole('editor', alice.accessToken);
+    const live = connect(viewRoom.id, bob.accessToken);
+
+    try {
+      await whenSynced(live.provider, 'live');
+
+      const closed = new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 5000);
+        live.provider.once('connection-close', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+
+      await setRole('viewer', alice.accessToken);
+
+      assert.equal(
+        await closed,
+        true,
+        'an open socket must be dropped so it re-resolves the new role',
+      );
+    } finally {
+      live.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('promoting back to editor restores write access', async () => {
+    assert.equal((await setRole('editor', alice.accessToken)).status, 200);
+
+    const owner = connect(viewRoom.id, alice.accessToken);
+    const promoted = connect(viewRoom.id, bob.accessToken);
+    try {
+      await Promise.all([
+        whenSynced(owner.provider, 'owner'),
+        whenSynced(promoted.provider, 'promoted'),
+      ]);
+
+      promoted.text.insert(0, 'NOW_ALLOWED ');
+      await settle(700);
+
+      assert.ok(
+        owner.text.toString().includes('NOW_ALLOWED'),
+        'an editor promoted back should be able to write again',
+      );
+    } finally {
+      owner.provider.destroy();
+      promoted.provider.destroy();
+      await settle(1500);
+    }
+  });
+
   console.log('\nWeek 2 — snapshot persistence');
 
   // A dedicated room, so these tests can't be perturbed by connections left
