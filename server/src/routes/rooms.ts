@@ -61,7 +61,7 @@ roomsRouter.post('/join', async (req, res) => {
   const room = await RoomModel.findOneAndUpdate(
     { inviteToken, 'members.userId': { $ne: userId } },
     {
-      $push: { members: { userId, role: 'editor' } },
+      $push: { members: { userId, role: 'viewer' } },
       $set: { lastActiveAt: new Date() },
     },
     { new: true },
