@@ -3,7 +3,12 @@ import { RoomModel } from '../models/Room.ts';
 import { HttpError } from '../middleware/errors.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import { newInviteToken } from '../lib/tokens.ts';
-import { loadRoomForMember, serializeRoom, touchRoom } from '../lib/rooms.ts';
+import {
+  loadRoomForMember,
+  serializeRoom,
+  snapshotHealth,
+  touchRoom,
+} from '../lib/rooms.ts';
 import { disconnectMember } from '../ws/yjs.ts';
 import { byUser, rateLimit } from '../middleware/rateLimit.ts';
 import { ExecError, execute, isStubbed } from '../lib/judge0.ts';
@@ -218,5 +223,10 @@ roomsRouter.get('/:id', async (req, res) => {
   // so room ids can't be probed for existence.
   if (!found) throw new HttpError(404, 'Room not found');
 
-  res.json({ room: await serializeRoom(found.room, userId) });
+  // Only on opening a single room, not on the list: one indexed lookup where
+  // it matters rather than one per row.
+  res.json({
+    room: await serializeRoom(found.room, userId),
+    snapshot: await snapshotHealth(req.params.id as string),
+  });
 });

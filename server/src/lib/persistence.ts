@@ -1,5 +1,7 @@
+import { gunzipSync, gzipSync } from 'node:zlib';
 import * as Y from 'yjs';
 import { isValidObjectId } from 'mongoose';
+import { env } from '../config/env.ts';
 import { getYDoc, setPersistence, type WSSharedDoc } from '@y/websocket-server/utils';
 import { DocSnapshotModel } from '../models/DocSnapshot.ts';
 
@@ -15,6 +17,8 @@ type DocState = {
   timer: ReturnType<typeof setTimeout> | null;
   /** When the current unsaved run of edits began. */
   dirtySince: number | null;
+  /** Whether connected clients have already been told saving has stopped. */
+  warnedOversized: boolean;
 };
 
 const states = new Map<string, DocState>();
@@ -35,17 +39,108 @@ async function loadSnapshot(roomId: string, ydoc: Y.Doc): Promise<void> {
   const snapshot = await DocSnapshotModel.findOne({ roomId });
   if (!snapshot) return;
 
+  // Rows written before compression are stored raw, so honour the flag rather
+  // than assuming.
+  const stored = Buffer.from(snapshot.yjsState);
+
+  // An empty buffer is the marker written when a room's first snapshot was
+  // already too large; there is no state to apply.
+  if (stored.byteLength === 0) return;
+
+  const update = snapshot.compressed ? gunzipSync(stored) : stored;
+
   // Additive by construction: applying a stored update can only add content,
   // so a client that connected mid-load converges rather than conflicting.
-  Y.applyUpdate(ydoc, new Uint8Array(snapshot.yjsState));
+  Y.applyUpdate(ydoc, new Uint8Array(update));
+}
+
+export type SnapshotVerdict = 'ok' | 'warn' | 'too-large';
+
+/**
+ * Decides what to do with a snapshot of a given size.
+ *
+ * Split out from the write so the thresholds can be reasoned about and tested
+ * without needing to generate megabytes of document.
+ */
+export function classifySnapshot(storedBytes: number): SnapshotVerdict {
+  if (storedBytes > env.snapshotMaxBytes) return 'too-large';
+  if (storedBytes > env.snapshotWarnBytes) return 'warn';
+  return 'ok';
 }
 
 async function saveSnapshot(roomId: string, ydoc: Y.Doc): Promise<void> {
-  const state = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+  const raw = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+
+  // Yjs state is binary but still compresses usefully, and every byte saved is
+  // headroom against MongoDB's per-document ceiling.
+  const packed = gzipSync(raw);
+  const verdict = classifySnapshot(packed.byteLength);
+
+  if (verdict === 'too-large') {
+    /*
+     * Flag the row but leave yjsState alone. The previous snapshot is the last
+     * state that fitted, and keeping it means a restart restores something
+     * rather than nothing. The room is told, via the room API, that its recent
+     * edits are not being saved — the point of this guard is that the failure
+     * is visible instead of silent.
+     */
+    console.error(
+      `[snapshot] ${roomId} is too large to store: ${packed.byteLength} bytes ` +
+        `compressed (limit ${env.snapshotMaxBytes}). Keeping the last snapshot that fitted.`,
+    );
+
+    const state = states.get(roomId);
+    if (state && !state.warnedOversized) {
+      state.warnedOversized = true;
+      setOversizedFlag(ydoc, true, raw.byteLength);
+    }
+
+    await DocSnapshotModel.updateOne(
+      { roomId },
+      {
+        $set: { oversized: true, oversizedBytes: raw.byteLength },
+        // A room whose very first snapshot is already too large has no earlier
+        // state to preserve. Insert the marker anyway, so the condition is
+        // recorded rather than silently dropped by a no-op update.
+        $setOnInsert: {
+          yjsState: Buffer.alloc(0),
+          compressed: false,
+          sizeBytes: 0,
+          version: 0,
+          savedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+    return;
+  }
+
+  const state = states.get(roomId);
+  if (state?.warnedOversized) {
+    state.warnedOversized = false;
+    setOversizedFlag(ydoc, false, 0);
+  }
+
+  if (verdict === 'warn') {
+    console.warn(
+      `[snapshot] ${roomId} is getting large: ${packed.byteLength} bytes compressed ` +
+        `(limit ${env.snapshotMaxBytes})`,
+    );
+  }
 
   await DocSnapshotModel.updateOne(
     { roomId },
-    { $set: { yjsState: state, savedAt: new Date() }, $inc: { version: 1 } },
+    {
+      $set: {
+        yjsState: packed,
+        compressed: true,
+        sizeBytes: raw.byteLength,
+        oversized: false,
+        oversizedBytes: 0,
+        savedAt: new Date(),
+      },
+      $inc: { version: 1 },
+    },
     { upsert: true },
   );
 }
@@ -114,7 +209,7 @@ export function enableSnapshotPersistence(): void {
           ydoc.on('update', () => scheduleSave(docName, ydoc));
         });
 
-      states.set(docName, { ready, timer: null, dirtySince: null });
+      states.set(docName, { ready, timer: null, dirtySince: null, warnedOversized: false });
     },
 
     writeState: async (docName: string, ydoc: WSSharedDoc) => {
@@ -142,6 +237,29 @@ export function enableSnapshotPersistence(): void {
   });
 
   console.log('[snapshot] Yjs document persistence enabled');
+}
+
+/**
+ * Tells everyone in the room whether their edits are still being saved.
+ *
+ * Written into the document itself, so it reaches connected clients live over
+ * the sync channel — a warning that only appeared when the room was next
+ * opened would miss the moment it matters, which is while someone is typing.
+ *
+ * Guarded by `warnedOversized` so the write, which is itself a document
+ * update, cannot re-trigger the save that produced it.
+ */
+function setOversizedFlag(ydoc: Y.Doc, oversized: boolean, bytes: number): void {
+  ydoc.transact(() => {
+    const meta = ydoc.getMap('meta');
+    if (oversized) {
+      meta.set('snapshotOversized', true);
+      meta.set('snapshotBytes', bytes);
+    } else {
+      meta.delete('snapshotOversized');
+      meta.delete('snapshotBytes');
+    }
+  });
 }
 
 /**

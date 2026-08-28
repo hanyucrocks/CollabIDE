@@ -46,6 +46,15 @@ export const env = {
    * This is a server-side secret. It must never be exposed to the client:
    * anything the browser can read, anyone can read.
    */
+  /*
+   * MongoDB caps a single document at 16MB. A Yjs snapshot is stored inside
+   * one, so the ceiling is real; the default leaves headroom for the rest of
+   * the document. Lowered in development and CI so the guard can be tested
+   * without generating megabytes of text.
+   */
+  snapshotMaxBytes: Number(process.env.SNAPSHOT_MAX_BYTES ?? 12 * 1024 * 1024),
+  snapshotWarnBytes: Number(process.env.SNAPSHOT_WARN_BYTES ?? 4 * 1024 * 1024),
+
   judge0Url: process.env.JUDGE0_URL ?? 'https://judge0-ce.p.rapidapi.com',
   judge0ApiKey: process.env.JUDGE0_API_KEY ?? '',
   judge0Host: process.env.JUDGE0_HOST ?? 'judge0-ce.p.rapidapi.com',

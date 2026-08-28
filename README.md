@@ -211,6 +211,21 @@ Without `JUDGE0_API_KEY` the server falls back to a clearly-labelled stub, so
 local development and CI work without a key and no result ever pretends to have
 run.
 
+**Snapshot size.** MongoDB caps a document at 16MB and a Yjs snapshot is stored
+inside one, so there is a real ceiling. Snapshots are gzipped, and a state that
+would still exceed the limit is refused rather than written.
+
+Refusing keeps the previous snapshot rather than blanking the row: that state is
+the last version that fitted, so a restart restores something instead of
+nothing. The room is then told, through a `meta` entry in its own document, that
+saving has stopped — so everyone connected finds out while they are typing,
+which is when it matters, rather than the next time the room is opened. The flag
+clears itself once the document fits again.
+
+The thresholds are `SNAPSHOT_MAX_BYTES` and `SNAPSHOT_WARN_BYTES`, defaulting to
+12MB and 4MB. They are lowered in `.env` so the guard is reachable in tests
+without generating megabytes of text; production leaves them unset.
+
 **Rate limiting.** `server/src/middleware/rateLimit.ts`. Execution is capped at
 one run per user per three seconds — it spends a third-party quota and runs
 untrusted code, so it is the one path with a hard limit. Auth is capped at 20
@@ -272,7 +287,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 47/47 against the live server, and the browser path was
+`npm run smoke` passes 51/51 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.

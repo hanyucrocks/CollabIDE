@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { inviteUrl } from '../lib/invite.ts';
-import { api, type Room } from '../lib/api.ts';
+import { api, type Room, type SnapshotHealth } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { colorForUser, useCollabDoc, type Identity } from '../lib/useCollabDoc.ts';
 import { CodeEditor } from './CodeEditor.tsx';
 import { OutputPanel } from './OutputPanel.tsx';
 import { useExecState } from '../lib/useExecState.ts';
+import { useRoomMeta } from '../lib/useRoomMeta.ts';
 import { useOnlinePeers } from '../lib/useOnlinePeers.ts';
 
 export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => void }) {
   const { user, tokenVersion } = useAuth();
   const [room, setRoom] = useState<Room | null>(null);
+  const [snapshot, setSnapshot] = useState<SnapshotHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const identity = useMemo<Identity | null>(
@@ -24,6 +26,7 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
   const [runError, setRunError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const exec = useExecState(ydoc);
+  const meta = useRoomMeta(ydoc);
 
   const canRun = room?.role === 'owner' || room?.role === 'editor';
 
@@ -60,7 +63,11 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
     let cancelled = false;
     api
       .getRoom(roomId)
-      .then((loaded) => !cancelled && setRoom(loaded))
+      .then((loaded) => {
+        if (cancelled) return;
+        setRoom(loaded.room);
+        setSnapshot(loaded.snapshot);
+      })
       .catch((err: unknown) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Could not load room'),
       );
@@ -129,6 +136,22 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
           <button type="button" className="secondary" onClick={copyInvite}>
             {copied ? 'Copied' : 'Copy link'}
           </button>
+        </div>
+      )}
+
+      {(meta.snapshotOversized || snapshot?.oversized) && (
+        <div className="card warning">
+          <strong>This document is no longer being saved</strong>
+          <p className="muted">
+            It has grown to{' '}
+            {(((meta.snapshotBytes ?? snapshot?.bytes) ?? 0) / 1_000_000).toFixed(1)} MB,
+            past what can be stored. Everyone still sees your edits live, but they
+            will not survive a restart
+            {snapshot?.lastSavedAt
+              ? ` — the last saved version is from ${new Date(snapshot.lastSavedAt).toLocaleString()}`
+              : ''}
+            . Shortening the file lets saving resume.
+          </p>
         </div>
       )}
 

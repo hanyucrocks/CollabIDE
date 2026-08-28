@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import mongoose from 'mongoose';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -149,6 +150,17 @@ async function waitForValue<T>(
     value = await read();
   }
   return value;
+}
+
+/** Decodes a stored snapshot, honouring the compression flag. */
+function decodeSnapshot(row: Json): string {
+  const raw = Buffer.from(row.yjsState.buffer ?? row.yjsState);
+  if (raw.byteLength === 0) return '';
+
+  const update = row.compressed ? zlib.gunzipSync(raw) : raw;
+  const probe = new Y.Doc();
+  Y.applyUpdate(probe, new Uint8Array(update));
+  return probe.getText('code').toString();
 }
 
 function occurrences(haystack: string, needle: string): number {
@@ -967,9 +979,7 @@ async function main() {
 
     // Decode the stored bytes rather than trusting that a row exists: this is
     // what proves we persisted real Yjs state and not an empty document.
-    const probe = new Y.Doc();
-    Y.applyUpdate(probe, new Uint8Array(stored.yjsState.buffer ?? stored.yjsState));
-    assert.equal(probe.getText('code').toString(), FIRST);
+    assert.equal(decodeSnapshot(stored), FIRST);
   });
 
   await test('a cold room rehydrates from its snapshot', async () => {
@@ -1009,6 +1019,115 @@ async function main() {
     ))?.version as number;
 
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
+  });
+
+  console.log('\nSnapshot size guard');
+
+  const bigRoom = (
+    await call('/api/rooms', {
+      method: 'POST',
+      body: { name: 'Oversize', language: 'javascript' },
+      token: alice.accessToken,
+    })
+  ).body.room as Json;
+
+  const GOOD = '// small enough to store\n';
+
+  await test('a normal document is stored and reported healthy', async () => {
+    const writer = connect(bigRoom.id, alice.accessToken);
+    await whenSynced(writer.provider, 'writer');
+    writer.text.insert(0, GOOD);
+    await settle(500);
+    writer.provider.destroy();
+    await settle(1800);
+
+    const stored = await waitForValue(
+      () => snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
+      (row) => row !== null,
+      20_000,
+    );
+
+    assert.ok(stored, 'expected a snapshot');
+    assert.equal(stored.oversized, false);
+    assert.equal(stored.compressed, true, 'snapshots should be stored compressed');
+
+    const { snapshot } = (await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken }))
+      .body as Json;
+    assert.equal(snapshot, null, 'a healthy room should report no snapshot problem');
+  });
+
+  await test('an oversized document is refused without losing the last good one', async () => {
+    const writer = connect(bigRoom.id, alice.accessToken);
+    await whenSynced(writer.provider, 'writer');
+
+    // Base64 of random bytes: ~6 bits per character, so gzip cannot compress
+    // it the way it compresses the 4-bits-per-character hex of a UUID. An
+    // earlier version of this test used UUIDs and quietly stayed under the
+    // ceiling it was meant to breach.
+    const filler = crypto.randomBytes(900_000).toString('base64');
+    writer.text.insert(writer.text.length, filler);
+
+    await settle(3000);
+    writer.provider.destroy();
+    await settle(2500);
+
+    const row = await waitForValue(
+      () => snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
+      (r) => r?.oversized === true,
+      20_000,
+    );
+
+    assert.equal(row?.oversized, true, 'the oversized document should be flagged');
+
+    // The critical property: the earlier snapshot is still there. Blanking it
+    // would be exactly the data loss this guard exists to prevent.
+    assert.equal(
+      decodeSnapshot(row),
+      GOOD,
+      'the last snapshot that fitted must be preserved',
+    );
+  });
+
+  await test('a connected client is told live that saving has stopped', async () => {
+    const liveRoom = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Live oversize', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    const peer = connect(liveRoom.id, alice.accessToken);
+
+    try {
+      await whenSynced(peer.provider, 'peer');
+      const meta = peer.doc.getMap('meta');
+      assert.equal(meta.get('snapshotOversized'), undefined, 'should start clean');
+
+      peer.text.insert(0, crypto.randomBytes(900_000).toString('base64'));
+
+      // Stays connected throughout: the warning has to arrive while someone is
+      // typing, not only when the room is next opened.
+      const warned = await waitFor(() => meta.get('snapshotOversized') === true, 30_000);
+
+      assert.ok(warned, 'a connected client should learn that saving stopped');
+      assert.ok(
+        (meta.get('snapshotBytes') as number) > 0,
+        'the warning should say how large the document got',
+      );
+    } finally {
+      peer.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('the room reports that it is no longer being saved', async () => {
+    const { snapshot } = (await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken }))
+      .body as Json;
+
+    assert.ok(snapshot, 'the room should report a snapshot problem');
+    assert.equal(snapshot.oversized, true);
+    assert.ok(snapshot.bytes > 0, 'it should say how large the document got');
   });
 
   console.log('\nWeek 3 — auth abuse limits');

@@ -18,6 +18,18 @@ const docSnapshotSchema = new Schema({
     unique: true,
   },
   yjsState: { type: Buffer, required: true },
+  /** Whether yjsState is gzipped. Older rows predate compression. */
+  compressed: { type: Boolean, required: true, default: false },
+  /** Uncompressed size of the last successful save, for observability. */
+  sizeBytes: { type: Number, required: true, default: 0 },
+  /*
+   * Set when a document grew past what can be stored. yjsState still holds the
+   * last state that fitted: refusing to write and blanking the row would be
+   * the same data loss this guard exists to prevent, so the older snapshot is
+   * deliberately kept and the room is told its recent edits are not saved.
+   */
+  oversized: { type: Boolean, required: true, default: false },
+  oversizedBytes: { type: Number, required: true, default: 0 },
   version: { type: Number, required: true, default: 0 },
   savedAt: { type: Date, required: true, default: Date.now },
 });

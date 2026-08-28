@@ -8,6 +8,13 @@ export type AuthUser = { id: string; email: string; createdAt: string };
 
 export type RoomMember = { userId: string; email: string | null; role: Role };
 
+/** Present only when the room's document has outgrown what can be stored. */
+export type SnapshotHealth = {
+  oversized: true;
+  bytes: number;
+  lastSavedAt: string;
+};
+
 export type Room = {
   id: string;
   name: string;
@@ -189,7 +196,7 @@ export const api = {
     }).then((r) => r.room),
 
   getRoom: (id: string) =>
-    request<{ room: Room }>(`/api/rooms/${id}`).then((r) => r.room),
+    request<{ room: Room; snapshot: SnapshotHealth | null }>(`/api/rooms/${id}`),
 
   /**
    * Triggers a run. The result is not taken from this response — it arrives

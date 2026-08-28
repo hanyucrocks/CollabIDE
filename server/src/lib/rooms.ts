@@ -1,6 +1,7 @@
 import { isValidObjectId } from 'mongoose';
 import { RoomModel, type RoomDoc, type Role } from '../models/Room.ts';
 import { UserModel } from '../models/User.ts';
+import { DocSnapshotModel } from '../models/DocSnapshot.ts';
 
 /** Returns the caller's role in the room, or null if they aren't a member. */
 export function roleOf(room: RoomDoc, userId: string): Role | null {
@@ -24,6 +25,28 @@ export async function loadRoomForMember(
 
   const role = roleOf(room, userId);
   return role ? { room, role } : null;
+}
+
+/**
+ * Whether the room's document has outgrown what can be stored.
+ *
+ * Surfaced so the editor can say so. A storage guard that only writes to the
+ * server log leaves people typing into something that is no longer being
+ * saved, which is the failure this guard exists to prevent.
+ */
+export async function snapshotHealth(roomId: string) {
+  const snapshot = await DocSnapshotModel.findOne(
+    { roomId },
+    { oversized: 1, oversizedBytes: 1, sizeBytes: 1, savedAt: 1 },
+  );
+
+  if (!snapshot?.oversized) return null;
+
+  return {
+    oversized: true,
+    bytes: snapshot.oversizedBytes,
+    lastSavedAt: snapshot.savedAt,
+  };
 }
 
 /** Room shape sent to clients. inviteToken is owner-only: editors can't invite. */

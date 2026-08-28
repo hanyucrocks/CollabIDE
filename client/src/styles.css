@@ -264,3 +264,9 @@ button.link {
   text-transform: uppercase;
   color: var(--muted);
 }
+
+.card.warning {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  gap: 0.4rem;
+}
