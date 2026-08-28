@@ -177,8 +177,9 @@ case), and lands in the room the moment they have one. Nothing needs to be
 stashed anywhere to survive the login. The lobby's join field still accepts a
 bare token as well as a full link, because people paste both.
 
-**Roles.** `PATCH /api/rooms/:id/members/:userId` lets the owner move a member
-between `editor` and `viewer`. Owners are excluded: demoting one would leave the
+**Roles.** The owner gets a role control beside each member in the room view;
+`PATCH /api/rooms/:id/members/:userId` backs it and moves a member between
+`editor` and `viewer`. Owners are excluded: demoting one would leave the
 room unmanageable, and ownership transfer is a separate operation that does not
 exist yet.
 
@@ -193,6 +194,14 @@ A connection's role is resolved once, at handshake, so a role change closes the
 member's open sockets and lets the client reconnect with its new role. The close
 uses code 1000 on purpose: y-websocket treats 4400-4499 as permanent and would
 stop reconnecting.
+
+The client refetches the room whenever the socket reconnects, which is what
+makes a demotion visible to the person demoted: without it they keep a writable
+editor whose edits the server silently refuses.
+
+Note when testing this by hand: Monaco's hidden textarea reports `readOnly`
+whenever the editor is merely unfocused, so it reads the same either way. The
+editor container carries `data-readonly` for this reason.
 
 **Execution.** `POST /api/rooms/:id/exec` runs the room's code through Judge0.
 The source is read from the *server's* copy of the document, not from the
@@ -347,8 +356,8 @@ These are scope boundaries, not bugs — each is a later week's work.
   the token is short-lived, which limits but does not remove the exposure.
 - **The refresh token is in `localStorage`**, so it is reachable by any XSS.
 - **No rate limiting** on any endpoint, including signup and login.
-- **No permissions UI.** Role changes go through the API only; there is no
-  control in the room view yet.
+- **No ownership transfer.** The owner's role is fixed, so a room cannot be
+  handed over or its owner demoted.
 - **The client has no test runner.** Server behaviour is covered by the smoke
   suite, but client-side logic — `lib/invite.ts`, the caret and cursor handling
   in `CodeEditor.tsx` — is only verified by driving a browser. Worth adding

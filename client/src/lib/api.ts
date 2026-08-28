@@ -198,6 +198,13 @@ export const api = {
   getRoom: (id: string) =>
     request<{ room: Room; snapshot: SnapshotHealth | null }>(`/api/rooms/${id}`),
 
+  /** Owner-only. Moves a member between editor and viewer. */
+  setMemberRole: (roomId: string, userId: string, role: 'editor' | 'viewer') =>
+    request<{ room: Room }>(`/api/rooms/${roomId}/members/${userId}`, {
+      method: 'PATCH',
+      body: { role },
+    }).then((r) => r.room),
+
   /**
    * Triggers a run. The result is not taken from this response — it arrives
    * for every peer through the shared document, so the UI renders from there

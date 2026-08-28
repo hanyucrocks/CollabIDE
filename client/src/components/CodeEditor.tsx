@@ -151,5 +151,10 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     };
   }, [provider]);
 
-  return <div ref={container} className="editor" />;
+  /*
+   * data-readonly mirrors the prop deliberately. Monaco's own DOM is not a
+   * reliable signal: its hidden textarea reports readOnly while the editor is
+   * merely unfocused, so it reads the same whether or not editing is allowed.
+   */
+  return <div ref={container} className="editor" data-readonly={readOnly} />;
 }

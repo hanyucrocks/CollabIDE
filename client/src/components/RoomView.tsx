@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inviteUrl } from '../lib/invite.ts';
 import { api, type Room, type SnapshotHealth } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { colorForUser, useCollabDoc, type Identity } from '../lib/useCollabDoc.ts';
 import { CodeEditor } from './CodeEditor.tsx';
 import { OutputPanel } from './OutputPanel.tsx';
+import { MemberList } from './MemberList.tsx';
 import { useExecState } from '../lib/useExecState.ts';
 import { useRoomMeta } from '../lib/useRoomMeta.ts';
 import { useOnlinePeers } from '../lib/useOnlinePeers.ts';
@@ -59,22 +60,43 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
     return () => clearTimeout(timer);
   }, [copied]);
 
+  const refresh = useCallback(async () => {
+    const loaded = await api.getRoom(roomId);
+    setRoom(loaded.room);
+    setSnapshot(loaded.snapshot);
+  }, [roomId]);
+
   useEffect(() => {
     let cancelled = false;
-    api
-      .getRoom(roomId)
-      .then((loaded) => {
-        if (cancelled) return;
-        setRoom(loaded.room);
-        setSnapshot(loaded.snapshot);
-      })
-      .catch((err: unknown) =>
-        !cancelled && setError(err instanceof Error ? err.message : 'Could not load room'),
-      );
+    refresh().catch((err: unknown) => {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : 'Could not load room');
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [roomId]);
+  }, [refresh]);
+
+  /*
+   * A role change closes the affected member's socket so it reconnects with
+   * the new role. Refetching on reconnect is what makes that visible to them:
+   * without it a demoted editor keeps a writable editor whose edits the server
+   * silently refuses.
+   */
+  const wasConnected = useRef(false);
+
+  useEffect(() => {
+    if (status !== 'connected') {
+      if (status === 'disconnected') wasConnected.current = true;
+      return;
+    }
+    if (!wasConnected.current) {
+      wasConnected.current = true;
+      return;
+    }
+    void refresh().catch(() => undefined);
+  }, [status, refresh]);
 
   if (error) {
     return (
@@ -167,17 +189,7 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
       <OutputPanel state={exec} />
 
       {room && (
-        <div className="card">
-          <h2>Members</h2>
-          <ul className="room-list">
-            {room.members.map((member) => (
-              <li key={member.userId}>
-                <span>{member.email ?? member.userId}</span>
-                <span className="muted">{member.role}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <MemberList room={room} currentUserId={user?.id} onRoomChange={setRoom} />
       )}
     </div>
   );
