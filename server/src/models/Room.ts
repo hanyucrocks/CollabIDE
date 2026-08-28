@@ -27,6 +27,9 @@ const roomSchema = new Schema(
 // Drives "rooms I'm a member of" lookups.
 roomSchema.index({ 'members.userId': 1 });
 
+// Drives the stale-room sweep, which would otherwise scan every room.
+roomSchema.index({ lastActiveAt: 1 });
+
 export type Room = InferSchemaType<typeof roomSchema>;
 export type RoomDoc = HydratedDocument<Room>;
 

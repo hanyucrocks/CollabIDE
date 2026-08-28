@@ -10,6 +10,7 @@ import { roomsRouter } from './routes/rooms.ts';
 import { errorHandler, notFound } from './middleware/errors.ts';
 import { attachYjsWebsocket } from './ws/yjs.ts';
 import { enableSnapshotPersistence, flushSnapshots } from './lib/persistence.ts';
+import { startCleanupSchedule } from './lib/cleanup.ts';
 
 const app = express();
 
@@ -64,6 +65,8 @@ server.listen(env.port, () => {
 });
 
 void connectDb();
+
+startCleanupSchedule();
 
 // Snapshots are debounced, so an abrupt exit can drop up to MAX_WAIT_MS of
 // edits. On a signal, write the pending ones out before going away.

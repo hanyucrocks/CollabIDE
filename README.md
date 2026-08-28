@@ -226,6 +226,20 @@ The thresholds are `SNAPSHOT_MAX_BYTES` and `SNAPSHOT_WARN_BYTES`, defaulting to
 12MB and 4MB. They are lowered in `.env` so the guard is reachable in tests
 without generating megabytes of text; production leaves them unset.
 
+**Stale rooms.** Rooms nobody has touched for `ROOM_TTL_DAYS` (default 30) are
+deleted along with their snapshots, on a timer. Storage is finite, signup is
+open, and an abandoned room keeps costing a document and a snapshot forever.
+
+Two deliberate choices. A room with a live connection is never swept however old
+its `lastActiveAt` looks — a stale timestamp with an open socket means the
+timestamp is wrong, not the room, and deleting it would pull a document out from
+under someone typing in it. And the room goes with its snapshot rather than the
+snapshot alone: dropping the content while keeping the room turns something
+people can still open into something that silently opens empty, which is worse
+than it being gone. Every deletion is logged by name and age.
+
+Set `ROOM_TTL_DAYS=0` to disable the sweep entirely.
+
 **Rate limiting.** `server/src/middleware/rateLimit.ts`. Execution is capped at
 one run per user per three seconds — it spends a third-party quota and runs
 untrusted code, so it is the one path with a hard limit. Auth is capped at 20
@@ -287,7 +301,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 51/51 against the live server, and the browser path was
+`npm run smoke` passes 54/54 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.

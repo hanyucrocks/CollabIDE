@@ -47,6 +47,14 @@ export const env = {
    * anything the browser can read, anyone can read.
    */
   /*
+   * Rooms untouched for this long are deleted along with their snapshots.
+   * Storage is finite and abandoned rooms never stop costing; 0 disables the
+   * sweep entirely.
+   */
+  roomTtlDays: Number(process.env.ROOM_TTL_DAYS ?? 30),
+  cleanupIntervalSeconds: Number(process.env.CLEANUP_INTERVAL_SECONDS ?? 6 * 60 * 60),
+
+  /*
    * MongoDB caps a single document at 16MB. A Yjs snapshot is stored inside
    * one, so the ceiling is real; the default leaves headroom for the rest of
    * the document. Lowered in development and CI so the guard can be tested

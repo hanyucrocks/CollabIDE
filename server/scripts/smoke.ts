@@ -163,6 +163,19 @@ function decodeSnapshot(row: Json): string {
   return probe.getText('code').toString();
 }
 
+/** waitFor, for a condition that has to be awaited. */
+async function waitForAsync(
+  condition: () => Promise<boolean>,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return true;
+    await settle(500);
+  }
+  return condition();
+}
+
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
@@ -1128,6 +1141,97 @@ async function main() {
     assert.ok(snapshot, 'the room should report a snapshot problem');
     assert.equal(snapshot.oversized, true);
     assert.ok(snapshot.bytes > 0, 'it should say how large the document got');
+  });
+
+  console.log('\nStale room cleanup');
+
+  const rooms = mongoose.connection.collection('rooms');
+
+  /** Backdates a room so the sweep considers it abandoned. */
+  const ageRoom = (id: string, days: number) =>
+    rooms.updateOne(
+      { _id: new mongoose.Types.ObjectId(id) },
+      { $set: { lastActiveAt: new Date(Date.now() - days * 86_400_000) } },
+    );
+
+  const roomExists = async (id: string) =>
+    (await rooms.findOne({ _id: new mongoose.Types.ObjectId(id) })) !== null;
+
+  await test('a recently used room is left alone', async () => {
+    const fresh = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Fresh', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    await settle(7000);
+    assert.ok(await roomExists(fresh.id as string), 'an active room must not be swept');
+  });
+
+  await test('an abandoned room and its snapshot are removed', async () => {
+    const stale = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Abandoned', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    // Give it content so there is a snapshot to clean up too.
+    const writer = connect(stale.id, alice.accessToken);
+    await whenSynced(writer.provider, 'writer');
+    writer.text.insert(0, 'let forgotten = true;\n');
+    await settle(600);
+    writer.provider.destroy();
+    await settle(2000);
+
+    const roomId = new mongoose.Types.ObjectId(stale.id as string);
+    assert.ok(await snapshots.findOne({ roomId }), 'expected a snapshot to exist first');
+
+    await ageRoom(stale.id as string, 90);
+
+    const gone = await waitForAsync(
+      async () => !(await roomExists(stale.id as string)),
+      25_000,
+    );
+    assert.ok(gone, 'an abandoned room should be swept');
+    assert.equal(
+      await snapshots.findOne({ roomId }),
+      null,
+      'its snapshot should go with it',
+    );
+  });
+
+  await test('a room in use is never swept, however stale its timestamp', async () => {
+    const busy = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Busy', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    const peer = connect(busy.id, alice.accessToken);
+
+    try {
+      await whenSynced(peer.provider, 'peer');
+      await ageRoom(busy.id as string, 365);
+
+      // A stale timestamp with a live socket means the timestamp is wrong, not
+      // the room. Deleting it would drop a document out from under someone
+      // actively typing in it.
+      await settle(12_000);
+
+      assert.ok(
+        await roomExists(busy.id as string),
+        'a room with a live connection must survive the sweep',
+      );
+    } finally {
+      peer.provider.destroy();
+      await settle(1500);
+    }
   });
 
   console.log('\nWeek 3 — auth abuse limits');

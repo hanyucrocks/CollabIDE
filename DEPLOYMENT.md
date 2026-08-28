@@ -132,6 +132,10 @@ for a live interview. Railway has no sleep and no free tier; that is the trade.
 
 **Atlas M0 has no backups.** Fine for a demo, not for anything you would miss.
 
+**Rooms are deleted after 30 days of inactivity**, along with their snapshots,
+to stop abandoned rooms filling a finite tier. Rooms with someone connected are
+never swept. Set `ROOM_TTL_DAYS` to change the window or `0` to turn it off.
+
 ## Configuration reference
 
 **Server** (Render dashboard):

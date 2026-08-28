@@ -43,6 +43,17 @@ function untrack(roomId: string, userId: string, ws: WebSocket): void {
   if (byUser.size === 0) roomConnections.delete(roomId);
 }
 
+/** Whether anyone is currently connected to a room. */
+export function hasConnections(roomId: string): boolean {
+  const byUser = roomConnections.get(roomId);
+  if (!byUser) return false;
+
+  for (const sockets of byUser.values()) {
+    if (sockets.size > 0) return true;
+  }
+  return false;
+}
+
 /**
  * Drops a member's sockets so their next connection re-resolves the new role.
  *

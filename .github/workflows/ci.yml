@@ -40,6 +40,10 @@ jobs:
       # values in server/.env — CI does not read that file.
       SNAPSHOT_MAX_BYTES: '262144'
       SNAPSHOT_WARN_BYTES: '131072'
+      # The sweep runs on a timer; at the 6-hour production interval a test
+      # would never see it. The TTL stays realistic because the tests backdate
+      # lastActiveAt directly.
+      CLEANUP_INTERVAL_SECONDS: '5'
 
     steps:
       - uses: actions/checkout@v4
