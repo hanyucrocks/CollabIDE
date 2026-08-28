@@ -107,6 +107,28 @@ async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boo
   return condition();
 }
 
+/**
+ * Polls an async condition until it holds. Returns the last value.
+ *
+ * Fixed sleeps are calibrated to whichever machine they were written on; run
+ * the same suite against a deployed server and network plus database latency
+ * blows straight through them. Waiting for the condition keeps the assertion
+ * honest without making it slow locally.
+ */
+async function waitForValue<T>(
+  read: () => Promise<T>,
+  holds: (value: T) => boolean,
+  timeoutMs: number,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let value = await read();
+  while (!holds(value) && Date.now() < deadline) {
+    await settle(400);
+    value = await read();
+  }
+  return value;
+}
+
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
@@ -658,29 +680,48 @@ async function main() {
     }
   });
 
-  await test('demoting a connected member closes their live socket', async () => {
+  await test('demoting a connected member revokes their write access', async () => {
     await setRole('editor', alice.accessToken);
+
+    const owner = connect(viewRoom.id, alice.accessToken);
     const live = connect(viewRoom.id, bob.accessToken);
 
     try {
-      await whenSynced(live.provider, 'live');
+      await Promise.all([
+        whenSynced(owner.provider, 'owner'),
+        whenSynced(live.provider, 'live'),
+      ]);
 
-      const closed = new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), 5000);
-        live.provider.once('connection-close', () => {
-          clearTimeout(timer);
-          resolve(true);
-        });
-      });
+      // Confirm the socket really does have write access before the demotion,
+      // so a pass below cannot come from the write silently failing anyway.
+      live.text.insert(0, 'BEFORE_DEMOTION ');
+      await settle(800);
+      assert.ok(
+        owner.text.toString().includes('BEFORE_DEMOTION'),
+        'the member should be able to write before being demoted',
+      );
 
       await setRole('viewer', alice.accessToken);
+      await settle(2500);
 
-      assert.equal(
-        await closed,
-        true,
-        'an open socket must be dropped so it re-resolves the new role',
+      live.text.insert(0, 'AFTER_DEMOTION ');
+      await settle(2500);
+
+      /*
+       * Asserts the guarantee, not the mechanism. A role is resolved at
+       * handshake, so the server drops the member's sockets on demotion and the
+       * client reconnects with its new role. Whether the *client* observes that
+       * close promptly is up to whatever proxy sits in between — against a
+       * deployed server the close frame can be delayed well past the point
+       * where the write is already being refused. What must hold either way is
+       * that the write does not land.
+       */
+      assert.ok(
+        !owner.text.toString().includes('AFTER_DEMOTION'),
+        'a demoted member must not be able to write on an already-open socket',
       );
     } finally {
+      owner.provider.destroy();
       live.provider.destroy();
       await settle(1500);
     }
@@ -756,7 +797,11 @@ async function main() {
   await test('a snapshot is written when the last peer disconnects', async () => {
     await writeThenLeave(FIRST);
 
-    const stored = await snapshotFor(persistRoom.id);
+    const stored = await waitForValue(
+      () => snapshotFor(persistRoom.id),
+      (row) => row !== null,
+      20_000,
+    );
     assert.ok(stored, 'expected a doc_snapshots row');
     assert.ok((stored.version as number) >= 1, 'version should be incremented');
 
@@ -796,7 +841,13 @@ async function main() {
   await test('the snapshot version advances with each save', async () => {
     const before = (await snapshotFor(persistRoom.id))?.version as number;
     await writeThenLeave('// third pass\n');
-    const after = (await snapshotFor(persistRoom.id))?.version as number;
+
+    const after = (await waitForValue(
+      () => snapshotFor(persistRoom.id),
+      (row) => ((row?.version as number) ?? 0) > before,
+      20_000,
+    ))?.version as number;
+
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
   });
 

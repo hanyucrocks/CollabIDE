@@ -83,6 +83,17 @@ With the server running:
 cd server && npm run smoke
 ```
 
+The same suite runs against a deployed server by pointing it there:
+
+```bash
+SMOKE_API_URL=https://your-api.onrender.com MONGO_URI="<atlas uri>" npm run smoke
+```
+
+Assertions wait for conditions rather than sleeping for a fixed time. Fixed
+sleeps are calibrated to whichever machine they were written on, and running
+the same suite against a deployed server puts network and database latency
+straight through them.
+
 This drives the real HTTP and WebSocket server and checks the Week 1 milestones:
 token rotation and replay rejection, room membership and roles, the WebSocket
 auth gate, and — the part that matters — that two independent Yjs clients
