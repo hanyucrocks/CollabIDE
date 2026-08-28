@@ -4,6 +4,7 @@ import { HttpError } from '../middleware/errors.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import { newInviteToken } from '../lib/tokens.ts';
 import { loadRoomForMember, serializeRoom } from '../lib/rooms.ts';
+import { disconnectMember } from '../ws/yjs.ts';
 
 export const roomsRouter = Router();
 
@@ -76,6 +77,54 @@ roomsRouter.post('/join', async (req, res) => {
   if (!existing) throw new HttpError(404, 'Invalid invite token');
 
   res.json({ room: await serializeRoom(existing, userId) });
+});
+
+/**
+ * Owner-only role change. This is the API, not the permissions UI that Week 2
+ * defers — without it `viewer` is unreachable and the role cannot be enforced
+ * or tested.
+ */
+roomsRouter.patch('/:id/members/:userId', async (req, res) => {
+  const callerId = req.userId as string;
+  const { role } = (req.body ?? {}) as Record<string, unknown>;
+
+  // Deliberately not 'owner': transferring ownership is a different operation
+  // with different rules, and is not part of this endpoint.
+  if (role !== 'editor' && role !== 'viewer') {
+    throw new HttpError(400, "role must be 'editor' or 'viewer'");
+  }
+
+  const found = await loadRoomForMember(req.params.id, callerId);
+  if (!found) throw new HttpError(404, 'Room not found');
+  if (found.role !== 'owner') {
+    throw new HttpError(403, 'Only the room owner can change roles');
+  }
+
+  const { room } = found;
+  const targetId = req.params.userId;
+
+  // The owner is the room's anchor: demoting them would leave it with nobody
+  // able to manage it, and there is no ownership transfer yet.
+  if (targetId === room.ownerId.toString()) {
+    throw new HttpError(400, "The room owner's role cannot be changed");
+  }
+
+  const member = room.members.find((m) => m.userId.toString() === targetId);
+  if (!member) throw new HttpError(404, 'That user is not a member of this room');
+
+  if (member.role !== role) {
+    member.role = role;
+    await room.save();
+
+    // A socket's role is resolved at handshake, so an open connection would
+    // otherwise keep the permissions it had when it opened.
+    const dropped = disconnectMember(room.id as string, targetId);
+    if (dropped) {
+      console.log(`[rooms] closed ${dropped} socket(s) for ${targetId} after role change`);
+    }
+  }
+
+  res.json({ room: await serializeRoom(room, callerId) });
 });
 
 roomsRouter.get('/:id', async (req, res) => {
