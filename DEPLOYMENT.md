@@ -102,6 +102,26 @@ https://collabide.vercel.app,https://collabide-git-main-you.vercel.app
 Step 4 is the one that proves the whole stack: it only passes if Atlas, the
 persistence layer, and the WebSocket are all working together.
 
+## Verifying against the deployed server
+
+The smoke suite can be pointed at production, which is a far better check than
+clicking through the app:
+
+```bash
+cd server
+SMOKE_API_URL=https://your-api.onrender.com MONGO_URI="<atlas uri>" npm run smoke
+```
+
+It creates `@collabide.test` accounts and removes them when it finishes.
+
+One behaviour differs through a proxy and is worth knowing: when an owner
+demotes a member, the server closes that member's sockets so the client
+reconnects with its new role. The *close frame* can be delayed by the platform's
+proxy well past the point where writes are already being refused, so the client
+may still report itself connected for several seconds. The guarantee — that a
+demoted member cannot write — holds throughout; only the client's awareness of
+the close lags.
+
 ## Free-tier realities
 
 **Render free services sleep after ~15 minutes of inactivity.** Every WebSocket
