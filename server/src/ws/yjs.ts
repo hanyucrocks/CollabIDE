@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import { setupWSConnection } from '@y/websocket-server/utils';
 import { verifyAccessToken } from '../lib/tokens.ts';
 import { loadRoomForMember, touchRoom } from '../lib/rooms.ts';
+import { ensureDocLoaded } from '../lib/persistence.ts';
 
 const WS_PATH_PREFIX = '/yjs/';
 
@@ -63,6 +64,10 @@ export function attachYjsWebsocket(server: Server): void {
         reject(socket, 403, 'Forbidden');
         return;
       }
+
+      // Load the room's stored state before accepting the socket, so the
+      // client's first sync sees the real document rather than an empty one.
+      await ensureDocLoaded(roomId);
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         console.log(`[ws] ${userId} joined room ${roomId} as ${found.role}`);

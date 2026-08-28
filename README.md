@@ -5,10 +5,11 @@ document through CRDT sync, authenticated, in a Monaco editor with live remote
 cursors.
 
 **Week 1 (done):** auth, rooms, JWT-gated Yjs WebSocket sync, plain `<textarea>`.
-**Week 2 (in progress):** Monaco + y-monaco, presence/cursors via Yjs awareness.
+**Week 2 (in progress):** Monaco + y-monaco, presence/cursors via Yjs awareness,
+binary snapshot persistence.
 
-Still absent, by design: `doc_snapshots` persistence, `viewer` role enforcement,
-Judge0 execution, rate limiting, deployment.
+Still absent, by design: `viewer` role enforcement, Judge0 execution, rate
+limiting, deployment.
 
 ## Layout
 
@@ -135,6 +136,38 @@ treated as theft and drops every session for that user.
 is verified *before* the connection is accepted. Membership is checked too, not
 just token validity — otherwise any logged-in user could sync any room.
 
+**Persistence.** `server/src/lib/persistence.ts`. One `doc_snapshots` row per
+room, holding `Y.encodeStateAsUpdate` output as a Buffer and updated in place;
+`version` is a monotonic save counter. Keeping only the current state is the
+form of "periodic snapshots, not an event log" that does not grow without bound.
+
+Saves are triggered four ways: a 5s debounce after the last edit, a 30s maximum
+wait so a long uninterrupted typing run still gets written, on
+last-peer-disconnect, and by a flush on SIGINT/SIGTERM.
+
+Enabling persistence also changes memory behaviour: `@y/websocket-server` only
+evicts a room's document on last-peer-disconnect *when a persistence layer is
+configured*. Before this, every room ever opened stayed resident forever.
+
+### Two races this had to close
+
+Neither is hypothetical; both were caught by tests before they reached the app.
+
+**The library does not await `bindState`.** `getYDoc` kicks off the load without
+waiting, and `setupWSConnection` writes sync step 1 immediately. A client could
+therefore finish its initial sync against a still-empty document: the editor
+renders blank, and anything typed in that window is ordered against an empty doc
+rather than against the restored content — so a restored paragraph could end up
+*after* text the user typed "before" it. Fixed by calling `ensureDocLoaded()` in
+the upgrade handler, moving the wait to before the socket is accepted.
+
+**`docs.delete()` runs before the save completes.** The library drops the room
+from its map the instant the last peer leaves, while `writeState` is still in
+flight. A reconnect inside that window — a page reload is exactly this — would
+build a fresh document from the *previous* snapshot and silently lose the edits
+still being written. Fixed by tracking in-flight writes per room and having any
+subsequent load await them.
+
 ## Week 1 decisions worth knowing
 
 - **`inviteToken` is owner-only.** Editors and viewers do not receive it in API
@@ -147,10 +180,14 @@ just token validity — otherwise any logged-in user could sync any room.
 
 ## Verified
 
-`npm run smoke` passes 21/21 against the live server, and the browser path was
+`npm run smoke` passes 26/26 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.
+
+Persistence was additionally verified by restarting the server: content written
+2s before `SIGTERM` — inside the debounce window, so never written by the timer —
+came back intact, and a cold room rehydrated into Monaco from MongoDB.
 
 ### Reading Monaco's content in a test
 
@@ -165,9 +202,10 @@ against the `Y.Text` instead.
 
 These are scope boundaries, not bugs — each is a later week's work.
 
-- **Documents are not persisted.** `doc_snapshots` is Week 2+; the data model
-  brief scoped Week 1 to `users` and `rooms`. Room content lives in server memory
-  and is lost on server restart.
+- **An unclean kill can lose up to 30s of edits.** Snapshots are debounced, and
+  `SIGKILL` or a crash skips the shutdown flush. `SIGINT`/`SIGTERM` are handled.
+- **Snapshots are never pruned.** A room's row persists after the room stops
+  being used; stale-room cleanup is a later concern.
 - **The access token travels as a WebSocket query parameter.** Browsers cannot
   set headers on a WS handshake. Query strings are prone to ending up in logs;
   the token is short-lived, which limits but does not remove the exposure.

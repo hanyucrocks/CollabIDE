@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import WebSocket from 'ws';
@@ -352,6 +353,97 @@ async function main() {
     a.provider.destroy();
     b.provider.destroy();
   }
+
+  console.log('\nWeek 2 — snapshot persistence');
+
+  // A dedicated room, so these tests can't be perturbed by connections left
+  // open against the rooms used above — persistence only writes when the last
+  // peer of a room disconnects.
+  const persistRoom = (
+    await call('/api/rooms', {
+      method: 'POST',
+      body: { name: 'Persistence', language: 'javascript' },
+      token: alice.accessToken,
+    })
+  ).body.room as Json;
+
+  await call('/api/rooms/join', {
+    method: 'POST',
+    body: { inviteToken: persistRoom.inviteToken },
+    token: bob.accessToken,
+  });
+
+  await mongoose.connect(process.env.MONGO_URI as string);
+  const snapshots = mongoose.connection.collection('docsnapshots');
+  const snapshotFor = (id: string) =>
+    snapshots.findOne({ roomId: new mongoose.Types.ObjectId(id) });
+
+  const FIRST = 'function persisted() { return true; }\n';
+  const SECOND = '// appended after a cold restore\n';
+
+  /** Writes text into a room, then closes the only connection to it. */
+  async function writeThenLeave(text: string): Promise<void> {
+    const writer = connect(persistRoom.id, alice.accessToken);
+    await whenSynced(writer.provider, 'writer');
+    writer.text.insert(0, text);
+    await settle(500);
+    writer.provider.destroy();
+    // writeState runs on last-peer-disconnect; give it room to land.
+    await settle(1800);
+  }
+
+  await test('no snapshot exists before anyone opens the room', async () => {
+    assert.equal(await snapshotFor(persistRoom.id), null);
+  });
+
+  await test('a snapshot is written when the last peer disconnects', async () => {
+    await writeThenLeave(FIRST);
+
+    const stored = await snapshotFor(persistRoom.id);
+    assert.ok(stored, 'expected a doc_snapshots row');
+    assert.ok((stored.version as number) >= 1, 'version should be incremented');
+
+    // Decode the stored bytes rather than trusting that a row exists: this is
+    // what proves we persisted real Yjs state and not an empty document.
+    const probe = new Y.Doc();
+    Y.applyUpdate(probe, new Uint8Array(stored.yjsState.buffer ?? stored.yjsState));
+    assert.equal(probe.getText('code').toString(), FIRST);
+  });
+
+  await test('a cold room rehydrates from its snapshot', async () => {
+    const reader = connect(persistRoom.id, bob.accessToken);
+    try {
+      await whenSynced(reader.provider, 'reader');
+      await settle(700);
+      assert.equal(reader.text.toString(), FIRST);
+    } finally {
+      reader.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('edits after a restore are persisted on top', async () => {
+    await writeThenLeave(SECOND);
+
+    const reader = connect(persistRoom.id, bob.accessToken);
+    try {
+      await whenSynced(reader.provider, 'reader');
+      await settle(700);
+      assert.equal(reader.text.toString(), SECOND + FIRST);
+    } finally {
+      reader.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('the snapshot version advances with each save', async () => {
+    const before = (await snapshotFor(persistRoom.id))?.version as number;
+    await writeThenLeave('// third pass\n');
+    const after = (await snapshotFor(persistRoom.id))?.version as number;
+    assert.ok(after > before, `version should advance (${before} -> ${after})`);
+  });
+
+  await mongoose.disconnect().catch(() => undefined);
 
   console.log(
     `\n${failures.length === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failures.length} failed\x1b[0m`,
