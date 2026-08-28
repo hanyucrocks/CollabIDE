@@ -34,6 +34,12 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-not-used-anywhere-else
       CLIENT_ORIGIN: http://localhost:5173
       NODE_ENV: test
+      # Lowered so the snapshot oversize guard is actually reachable. At the
+      # 12MB production default a test would have to generate megabytes of
+      # incompressible text to breach it. These must stay in step with the
+      # values in server/.env — CI does not read that file.
+      SNAPSHOT_MAX_BYTES: '262144'
+      SNAPSHOT_WARN_BYTES: '131072'
 
     steps:
       - uses: actions/checkout@v4
