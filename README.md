@@ -24,6 +24,13 @@ client/   Vite + React 19, Monaco bound to Y.Text via y-monaco
   on the server; `.ts` files run directly)
 - MongoDB listening on `mongodb://127.0.0.1:27017`
 
+## Deploying
+
+See [DEPLOYMENT.md](DEPLOYMENT.md). Backend on Render (`render.yaml`), frontend
+on Vercel (`client/vercel.json`), database on Atlas. The two services need each
+other's URLs, so the order they are created in matters — that is the first thing
+the guide covers.
+
 ## Setup
 
 ```bash
@@ -82,6 +89,17 @@ auth gate, and — the part that matters — that two independent Yjs clients
 editing at the same offset simultaneously converge with neither write lost.
 
 ## How the pieces fit
+
+**Configuration.** The client derives its WebSocket URL from `VITE_API_URL`
+(`http` -> `ws`, `https` -> `wss`) rather than taking a second variable, so an
+HTTPS deployment cannot be left pointing at `ws://`. Browsers block that as mixed
+content and the only symptom is that sync silently never happens.
+
+`CLIENT_ORIGIN` is a comma-separated list: the frontend and API sit on different
+hosts in production, and preview deployments each get their own origin. The same
+list gates the WebSocket upgrade, since CORS does not apply to WebSockets — a
+browser will open one to any host. The JWT is the real gate; the origin check is
+defence in depth, and non-browser clients, which send no `Origin`, are unaffected.
 
 **Sync.** One `Y.Doc` per room, keyed by room id. `y-websocket` on the client,
 `@y/websocket-server` on the server. (`y-websocket` v3 no longer ships the server

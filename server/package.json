@@ -7,10 +7,10 @@
     "node": ">=23.6"
   },
   "scripts": {
-    "dev": "node --watch --env-file=.env src/index.ts",
-    "start": "node --env-file=.env src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "smoke": "node --env-file=.env scripts/smoke.ts"
+    "dev": "node --watch --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env src/index.ts",
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@y/websocket-server": "0.1.1",

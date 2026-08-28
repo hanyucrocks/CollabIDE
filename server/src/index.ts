@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import { docs } from '@y/websocket-server/utils';
-import { env } from './config/env.ts';
+import { env, isAllowedOrigin } from './config/env.ts';
 import { connectDb } from './db/connect.ts';
 import { authRouter } from './routes/auth.ts';
 import { roomsRouter } from './routes/rooms.ts';
@@ -13,7 +13,24 @@ import { enableSnapshotPersistence, flushSnapshots } from './lib/persistence.ts'
 
 const app = express();
 
-app.use(cors({ origin: env.clientOrigin }));
+// Render and similar hosts terminate TLS at a proxy; without this Express sees
+// every request as plain http from the proxy's address.
+if (env.isProduction) app.set('trust proxy', 1);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Omit the header rather than throwing: throwing surfaces as a 500,
+      // which misreports a blocked origin as a server fault and fills the logs
+      // with noise anyone can generate. Without the header the browser blocks
+      // the response itself, which is the actual enforcement point.
+      //
+      // CORS is not authorization — it only constrains browsers. Every route
+      // here is gated by JWT regardless.
+      callback(null, isAllowedOrigin(origin));
+    },
+  }),
+);
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -37,8 +54,8 @@ await connectDb();
 enableSnapshotPersistence();
 
 server.listen(env.port, () => {
-  console.log(`[http] REST  http://localhost:${env.port}/api`);
-  console.log(`[ws]   sync  ws://localhost:${env.port}/yjs/:roomId`);
+  console.log(`[server] ${env.nodeEnv}, listening on :${env.port}`);
+  console.log(`[server] allowed origins: ${env.clientOrigins.join(', ')}`);
 });
 
 // Snapshots are debounced, so an abrupt exit can drop up to MAX_WAIT_MS of
