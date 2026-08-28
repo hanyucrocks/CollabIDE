@@ -97,6 +97,20 @@ function connect(roomId: string, token: string) {
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Polls until a condition holds, or gives up. Returns whether it held. */
+async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return true;
+    await settle(100);
+  }
+  return condition();
+}
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 async function main() {
   console.log(`\nCollabIDE Week 1 smoke test → ${API}\n`);
 
@@ -354,6 +368,185 @@ async function main() {
     b.provider.destroy();
   }
 
+  console.log('\nPRD criterion — reconnect without data loss');
+
+  const netRoom = (
+    await call('/api/rooms', {
+      method: 'POST',
+      body: { name: 'Reconnect', language: 'javascript' },
+      token: alice.accessToken,
+    })
+  ).body.room as Json;
+
+  await call('/api/rooms/join', {
+    method: 'POST',
+    body: { inviteToken: netRoom.inviteToken },
+    token: bob.accessToken,
+  });
+
+  await test('a socket dropped mid-session reconnects on its own', async () => {
+    const a = connect(netRoom.id, alice.accessToken);
+    const b = connect(netRoom.id, bob.accessToken);
+
+    try {
+      await Promise.all([whenSynced(a.provider, 'a'), whenSynced(b.provider, 'b')]);
+      a.text.insert(0, 'before the drop\n');
+      await settle(600);
+      assert.ok(b.text.toString().includes('before the drop'));
+
+      // Close the underlying socket without telling the provider. shouldConnect
+      // stays true, so recovery has to come from the provider itself — this is
+      // the "automatic resync" the PRD asks for, not a manual reconnect.
+      assert.ok(b.provider.ws, 'expected a live socket to drop');
+      b.provider.ws.close();
+
+      assert.ok(
+        await waitFor(() => !b.provider.wsconnected, 3000),
+        'the socket should register as down',
+      );
+      assert.ok(
+        await waitFor(() => b.provider.wsconnected, 20_000),
+        'the provider should reconnect with no intervention',
+      );
+
+      a.text.insert(a.text.length, 'after the drop\n');
+      await settle(1200);
+      assert.equal(b.text.toString(), a.text.toString(), 'replicas must reconverge');
+    } finally {
+      a.provider.destroy();
+      b.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('edits made on both sides during an outage merge with no loss', async () => {
+    const a = connect(netRoom.id, alice.accessToken);
+    const b = connect(netRoom.id, bob.accessToken);
+
+    try {
+      await Promise.all([whenSynced(a.provider, 'a'), whenSynced(b.provider, 'b')]);
+      await settle(400);
+
+      b.provider.disconnect();
+      assert.ok(await waitFor(() => !b.provider.wsconnected, 3000), 'b should be offline');
+
+      // Both sides edit while partitioned, so this is a genuine divergence
+      // rather than one side simply idling.
+      a.text.insert(0, 'WHILE_A_ONLINE ');
+      b.text.insert(0, 'WHILE_B_OFFLINE ');
+      await settle(400);
+      assert.notEqual(
+        a.text.toString(),
+        b.text.toString(),
+        'the replicas should actually have diverged before reconnecting',
+      );
+
+      b.provider.connect();
+      assert.ok(await waitFor(() => b.provider.wsconnected, 15_000), 'b should reconnect');
+      await settle(1500);
+
+      assert.equal(a.text.toString(), b.text.toString(), 'replicas must converge');
+
+      const merged = a.text.toString();
+      assert.equal(occurrences(merged, 'WHILE_A_ONLINE'), 1, 'no loss, no duplication');
+      assert.equal(occurrences(merged, 'WHILE_B_OFFLINE'), 1, 'offline edit survives once');
+    } finally {
+      a.provider.destroy();
+      b.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('repeated flapping does not duplicate content', async () => {
+    const a = connect(netRoom.id, alice.accessToken);
+    const b = connect(netRoom.id, bob.accessToken);
+
+    try {
+      await Promise.all([whenSynced(a.provider, 'a'), whenSynced(b.provider, 'b')]);
+
+      for (let i = 0; i < 4; i++) {
+        b.provider.disconnect();
+        await waitFor(() => !b.provider.wsconnected, 3000);
+
+        b.text.insert(0, `FLAP${i} `);
+        a.text.insert(0, `PEER${i} `);
+
+        b.provider.connect();
+        assert.ok(
+          await waitFor(() => b.provider.wsconnected, 15_000),
+          `reconnect ${i} should succeed`,
+        );
+        await settle(700);
+      }
+
+      await settle(1500);
+      assert.equal(a.text.toString(), b.text.toString(), 'replicas must converge');
+
+      const merged = a.text.toString();
+      for (let i = 0; i < 4; i++) {
+        assert.equal(occurrences(merged, `FLAP${i} `), 1, `FLAP${i} duplicated or lost`);
+        assert.equal(occurrences(merged, `PEER${i} `), 1, `PEER${i} duplicated or lost`);
+      }
+    } finally {
+      a.provider.destroy();
+      b.provider.destroy();
+      await settle(1500);
+    }
+  });
+
+  await test('an offline peer merges into a room that was evicted meanwhile', async () => {
+    // The hardest version: the offline client's edits have to merge with a
+    // document the server rebuilt from a snapshot, not one still in memory.
+    const coldRoom = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Cold merge', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    await call('/api/rooms/join', {
+      method: 'POST',
+      body: { inviteToken: coldRoom.inviteToken },
+      token: bob.accessToken,
+    });
+
+    const online = connect(coldRoom.id, alice.accessToken);
+    const offline = connect(coldRoom.id, bob.accessToken);
+
+    try {
+      await Promise.all([
+        whenSynced(online.provider, 'online'),
+        whenSynced(offline.provider, 'offline'),
+      ]);
+
+      online.text.insert(0, 'SAVED_TO_SNAPSHOT\n');
+      await settle(600);
+
+      offline.provider.disconnect();
+      await waitFor(() => !offline.provider.wsconnected, 3000);
+      offline.text.insert(0, 'MADE_WHILE_OFFLINE\n');
+
+      // Last online peer leaves: the room is snapshotted and evicted.
+      online.provider.destroy();
+      await settle(2200);
+
+      offline.provider.connect();
+      assert.ok(
+        await waitFor(() => offline.provider.wsconnected, 15_000),
+        'the offline peer should reconnect',
+      );
+      await settle(1800);
+
+      const merged = offline.text.toString();
+      assert.equal(occurrences(merged, 'SAVED_TO_SNAPSHOT'), 1, 'snapshot content lost');
+      assert.equal(occurrences(merged, 'MADE_WHILE_OFFLINE'), 1, 'offline edit lost');
+    } finally {
+      offline.provider.destroy();
+      await settle(1500);
+    }
+  });
+
   console.log('\nWeek 2 — viewer role enforcement');
 
   const viewRoom = (
@@ -606,6 +799,31 @@ async function main() {
     const after = (await snapshotFor(persistRoom.id))?.version as number;
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
   });
+
+  // Every run creates throwaway accounts and rooms; without this they pile up
+  // in the dev database and have to be cleared by hand.
+  try {
+    const users = mongoose.connection.collection('users');
+    const rooms = mongoose.connection.collection('rooms');
+    const snaps = mongoose.connection.collection('docsnapshots');
+
+    const stale = await users.find({ email: /@collabide\.test$/ }, { projection: { _id: 1 } }).toArray();
+    const ownerIds = stale.map((u) => u._id);
+
+    const staleRooms = await rooms.find({ ownerId: { $in: ownerIds } }, { projection: { _id: 1 } }).toArray();
+    const roomIds = staleRooms.map((r) => r._id);
+
+    const removedSnaps = await snaps.deleteMany({ roomId: { $in: roomIds } });
+    const removedRooms = await rooms.deleteMany({ _id: { $in: roomIds } });
+    const removedUsers = await users.deleteMany({ _id: { $in: ownerIds } });
+
+    console.log(
+      `\ncleaned up ${removedUsers.deletedCount} user(s), ` +
+        `${removedRooms.deletedCount} room(s), ${removedSnaps.deletedCount} snapshot(s)`,
+    );
+  } catch (err) {
+    console.error('cleanup failed', err);
+  }
 
   await mongoose.disconnect().catch(() => undefined);
 

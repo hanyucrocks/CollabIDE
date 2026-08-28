@@ -199,7 +199,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 35/35 against the live server, and the browser path was
+`npm run smoke` passes 39/39 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.
@@ -207,6 +207,17 @@ active.
 Persistence was additionally verified by restarting the server: content written
 2s before `SIGTERM` — inside the debounce window, so never written by the timer —
 came back intact, and a cold room rehydrated into Monaco from MongoDB.
+
+Reconnection is covered against the PRD's "no data loss or duplicate content"
+criterion: a socket is closed out from under the provider so recovery has to be
+automatic, both replicas edit while partitioned (the suite asserts they really
+did diverge before reconnecting), the connection is flapped four times with
+edits between, and an offline peer is merged back into a room the server had
+already evicted and rebuilt from a snapshot. Markers are counted, not just
+searched for, so duplication fails the test as loudly as loss.
+
+The suite removes its own `@collabide.test` accounts, rooms and snapshots when
+it finishes.
 
 Viewer enforcement was checked from both ends: the suite asserts a viewer's edit
 reaches neither the other peer nor storage, and in the browser a demoted user's
