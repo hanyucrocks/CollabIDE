@@ -1,6 +1,10 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { UserModel, type UserDoc } from '../models/User.ts';
+import { env, githubEnabled } from '../config/env.ts';
+import { authorizeUrl, fetchIdentity, OAuthError } from '../lib/github.ts';
+import { mintHandoffCode, redeemHandoffCode } from '../lib/oauth.ts';
 import { HttpError } from '../middleware/errors.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import { clientIp, rateLimit } from '../middleware/rateLimit.ts';
@@ -108,9 +112,16 @@ authRouter.post('/login', async (req, res) => {
   const { email, password } = readCredentials(req.body);
 
   const user = await UserModel.findOne({ email });
-  // Same response for unknown email and wrong password, so this endpoint
-  // can't be used to enumerate which emails have accounts.
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+
+  /*
+   * Same response for an unknown email, a wrong password, and an account that
+   * has no password at all — one created through GitHub. Distinguishing them
+   * would leak both which emails have accounts and how each one signs in.
+   */
+  const valid =
+    user?.passwordHash && (await bcrypt.compare(password, user.passwordHash));
+
+  if (!valid) {
     throw new HttpError(401, 'Invalid email or password');
   }
 
@@ -162,6 +173,103 @@ authRouter.post('/logout', async (req, res) => {
   }
 
   res.status(204).end();
+});
+
+/** Which sign-in methods this deployment actually offers. */
+authRouter.get('/providers', (_req, res) => {
+  res.json({ password: true, github: githubEnabled() });
+});
+
+/**
+ * Where GitHub sends the browser back. Must match the OAuth app's registered
+ * callback exactly, so it is derived from the request the browser actually
+ * reached rather than hardcoded per environment. PUBLIC_API_URL overrides it
+ * where a proxy rewrites Host.
+ */
+function callbackUrl(req: Request): string {
+  const base = env.publicApiUrl || `${req.protocol}://${req.get('host')}`;
+  return `${base}/api/auth/github/callback`;
+}
+
+const STATE_TTL_SECONDS = 300;
+
+authRouter.get('/github', (req, res) => {
+  if (!githubEnabled()) throw new HttpError(501, 'GitHub sign-in is not configured');
+
+  /*
+   * A signed, short-lived state rather than one held server-side: it is only
+   * needed to prove the callback belongs to a flow this server started, and
+   * signing keeps that stateless across restarts.
+   */
+  const state = jwt.sign({ typ: 'oauth' }, env.accessSecret, {
+    expiresIn: STATE_TTL_SECONDS,
+  });
+
+  res.redirect(authorizeUrl(callbackUrl(req), state));
+});
+
+authRouter.get('/github/callback', async (req, res) => {
+  if (!githubEnabled()) throw new HttpError(501, 'GitHub sign-in is not configured');
+
+  const target = env.clientOrigins[0] ?? 'http://localhost:5173';
+  const fail = (reason: string) =>
+    res.redirect(`${target}/#oauth_error=${encodeURIComponent(reason)}`);
+
+  const { code, state } = req.query as { code?: string; state?: string };
+  if (!code || !state) return fail('GitHub did not return a code');
+
+  try {
+    jwt.verify(state, env.accessSecret);
+  } catch {
+    return fail('This sign-in link has expired. Try again.');
+  }
+
+  let identity;
+  try {
+    identity = await fetchIdentity(code, callbackUrl(req));
+  } catch (err) {
+    console.error('[oauth] github failed', err);
+    return fail(err instanceof OAuthError ? err.message : 'GitHub sign-in failed');
+  }
+
+  if (!identity.email) {
+    return fail('Your GitHub account has no verified primary email address');
+  }
+
+  /*
+   * Match on the GitHub id first: it is stable, whereas an email can be
+   * changed or reassigned. Only when there is no linked account do we fall
+   * back to the verified email, which links a GitHub login to an existing
+   * password account rather than creating a duplicate.
+   */
+  let user = await UserModel.findOne({ githubId: identity.id });
+
+  if (!user) {
+    user = await UserModel.findOne({ email: identity.email });
+
+    if (user) {
+      user.githubId = identity.id;
+      await user.save();
+    } else {
+      user = await UserModel.create({ email: identity.email, githubId: identity.id });
+    }
+  }
+
+  res.redirect(`${target}/#oauth=${mintHandoffCode(user.id as string)}`);
+});
+
+/** Trades the single-use handoff code for a real token pair. */
+authRouter.post('/github/exchange', async (req, res) => {
+  const { code } = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof code !== 'string' || !code) throw new HttpError(400, 'code is required');
+
+  const userId = redeemHandoffCode(code);
+  if (!userId) throw new HttpError(401, 'That sign-in code is expired or already used');
+
+  const user = await UserModel.findById(userId);
+  if (!user) throw new HttpError(401, 'That account no longer exists');
+
+  res.json({ user: publicUser(user), ...(await issueTokens(user)) });
 });
 
 authRouter.get('/me', requireAuth, async (req, res) => {

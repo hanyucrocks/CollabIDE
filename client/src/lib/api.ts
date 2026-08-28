@@ -146,6 +146,34 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+const RETURN_TO_KEY = 'collabide.returnTo';
+
+/**
+ * Hands off to GitHub, remembering where the user was headed.
+ *
+ * The destination goes in sessionStorage rather than through the OAuth state:
+ * it survives the redirect round trip in the same tab, and keeping it out of
+ * the URL means an invite token cannot leak to GitHub in a query string.
+ */
+export function startGithubSignIn(): void {
+  try {
+    sessionStorage.setItem(RETURN_TO_KEY, window.location.hash);
+  } catch {
+    // Private mode can refuse; losing the destination is not worth blocking on.
+  }
+  window.location.href = `${API_URL}/api/auth/github`;
+}
+
+export function takeReturnTo(): string {
+  try {
+    const value = sessionStorage.getItem(RETURN_TO_KEY) ?? '';
+    sessionStorage.removeItem(RETURN_TO_KEY);
+    return value;
+  } catch {
+    return '';
+  }
+}
+
 export const api = {
   async signup(email: string, password: string): Promise<AuthUser> {
     const session = await request<Session>('/api/auth/signup', {
@@ -180,6 +208,22 @@ export const api = {
   },
 
   me: () => request<{ user: AuthUser }>('/api/auth/me').then((r) => r.user),
+
+  providers: () =>
+    request<{ password: boolean; github: boolean }>('/api/auth/providers', {
+      auth: false,
+    }),
+
+  /** Trades the one-time code from the OAuth redirect for a session. */
+  async completeGithubSignIn(code: string): Promise<AuthUser> {
+    const session = await request<Session>('/api/auth/github/exchange', {
+      method: 'POST',
+      body: { code },
+      auth: false,
+    });
+    storeTokens(session);
+    return session.user;
+  },
 
   listRooms: () => request<{ rooms: Room[] }>('/api/rooms').then((r) => r.rooms),
 

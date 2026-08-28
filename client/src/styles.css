@@ -270,3 +270,26 @@ button.link {
   background: color-mix(in srgb, var(--danger) 8%, var(--surface));
   gap: 0.4rem;
 }
+
+button.github {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}

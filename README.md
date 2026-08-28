@@ -353,7 +353,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 54/54 against the live server, and the browser path was
+`npm run smoke` passes 59/59 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.

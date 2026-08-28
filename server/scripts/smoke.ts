@@ -269,6 +269,71 @@ async function main() {
     assert.equal(after.status, 401, 'a revoked token must not refresh');
   });
 
+  console.log('\nGitHub sign-in');
+
+  await test('the server reports which sign-in methods it offers', async () => {
+    const { status, body } = await call('/api/auth/providers');
+    assert.equal(status, 200);
+    assert.equal(body.password, true);
+    assert.equal(typeof body.github, 'boolean');
+  });
+
+  await test('OAuth routes report themselves unavailable when unconfigured', async () => {
+    const configured = (await call('/api/auth/providers')).body.github as boolean;
+    if (configured) {
+      console.log('      (GitHub is configured here — skipping the unconfigured case)');
+      return;
+    }
+    const { status } = await call('/api/auth/github');
+    assert.equal(status, 501, 'an unconfigured provider should say so, not fail obscurely');
+  });
+
+  await test('an unknown handoff code is refused', async () => {
+    const { status } = await call('/api/auth/github/exchange', {
+      method: 'POST',
+      body: { code: 'not-a-real-code' },
+    });
+    assert.equal(status, 401);
+  });
+
+  await test('a handoff exchange requires a code', async () => {
+    const { status } = await call('/api/auth/github/exchange', {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(status, 400);
+  });
+
+  await test('a passwordless account cannot be signed into with a password', async () => {
+    /*
+     * A GitHub-created account has no passwordHash. Logging in against one must
+     * fail the same way an unknown email does — and must not throw on the way,
+     * which is what a missing hash would have caused before it was handled.
+     */
+    const address = email('githubonly');
+    await mongoose.connect(process.env.MONGO_URI as string);
+    await mongoose.connection.collection('users').insertOne({
+      email: address,
+      githubId: `gh-${Date.now()}`,
+      refreshTokens: [],
+      createdAt: new Date(),
+    });
+
+    const { status, body } = await call('/api/auth/login', {
+      method: 'POST',
+      body: { email: address, password: 'correct-horse-battery' },
+    });
+
+    assert.equal(status, 401, 'should refuse, not error');
+    assert.equal(
+      body.error,
+      'Invalid email or password',
+      'the message must not reveal that this account signs in another way',
+    );
+
+    await mongoose.connection.collection('users').deleteOne({ email: address });
+  });
+
   console.log('\nMilestone 3 — rooms');
 
   const created = await call('/api/rooms', {

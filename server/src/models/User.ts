@@ -9,7 +9,14 @@ const userSchema = new Schema(
       lowercase: true,
       trim: true,
     },
-    passwordHash: { type: String, required: true },
+    /*
+     * Optional: an account created through GitHub has no password. Exactly one
+     * of passwordHash or githubId is always present, and an account can gain
+     * the other later by linking.
+     */
+    passwordHash: { type: String, required: false },
+    /* sparse so the unique index ignores password-only accounts. */
+    githubId: { type: String, required: false, unique: true, sparse: true },
     // SHA-256 hashes of issued refresh tokens. One entry per active device/session,
     // which is what makes selective revocation (logout on one device) possible.
     refreshTokens: { type: [String], default: [] },

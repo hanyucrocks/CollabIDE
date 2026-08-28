@@ -64,6 +64,18 @@ export const env = {
   snapshotWarnBytes: Number(process.env.SNAPSHOT_WARN_BYTES ?? 4 * 1024 * 1024),
 
   /*
+   * GitHub sign-in is optional. With no client id the routes report themselves
+   * unavailable and the client hides the button, so a deployment without an
+   * OAuth app behaves exactly as it did before rather than offering something
+   * that cannot work.
+   */
+  githubClientId: process.env.GITHUB_CLIENT_ID ?? '',
+  githubClientSecret: process.env.GITHUB_CLIENT_SECRET ?? '',
+  /* Overrides the callback origin when the API sits behind something that
+   * rewrites Host. Normally derived from the request. */
+  publicApiUrl: (process.env.PUBLIC_API_URL ?? '').replace(/\/+$/, ''),
+
+  /*
    * JUDGE0_URL alone decides whether execution is real: unset means the stub,
    * which keeps local development and CI working with no external service. It
    * deliberately has no default — defaulting to a provider would make an
@@ -78,6 +90,10 @@ export const env = {
   judge0ApiKey: process.env.JUDGE0_API_KEY ?? '',
   judge0Host: process.env.JUDGE0_HOST ?? 'judge0-ce.p.rapidapi.com',
 };
+
+export function githubEnabled(): boolean {
+  return Boolean(env.githubClientId && env.githubClientSecret);
+}
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
   // No Origin header at all: a non-browser client (curl, the smoke suite).

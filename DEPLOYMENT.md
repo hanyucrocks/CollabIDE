@@ -190,6 +190,35 @@ self-host, which the TRD already names as the V2 direction.
 Until `JUDGE0_URL` is set, runs return a labelled stub rather than failing, so
 the rest of the app can be shown without any execution service.
 
+## Enabling GitHub sign-in
+
+Optional. Without it the app offers password sign-in only and hides the button.
+
+Create an OAuth app at **github.com/settings/developers** → New OAuth App:
+
+| Field | Value |
+| --- | --- |
+| Homepage URL | your Vercel URL |
+| Authorization callback URL | `https://<your-api>.onrender.com/api/auth/github/callback` |
+
+The callback must match exactly — GitHub compares it literally. Then on
+**Render**:
+
+| Variable | Value |
+| --- | --- |
+| `GITHUB_CLIENT_ID` | from the OAuth app |
+| `GITHUB_CLIENT_SECRET` | from the OAuth app |
+
+For local development, register a second OAuth app with the callback
+`http://localhost:4000/api/auth/github/callback`; GitHub allows only one
+callback per app.
+
+Accounts are linked by **verified** primary email, so signing in with GitHub
+using the address of an existing password account joins them rather than
+creating a duplicate. An unverified address is refused: accepting one would let
+someone claim an address they do not control, and since linking is by email
+that is a route into another person's account.
+
 ## Not yet handled
 - **The access token travels as a WebSocket query parameter**, because browsers
   cannot set headers on a WS handshake. Query strings are prone to appearing in
