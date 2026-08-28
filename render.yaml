@@ -8,6 +8,14 @@ services:
     name: collabide-api
     runtime: node
     plan: free
+    # Every keystroke crosses this distance twice. Measured from India against
+    # the default Oregon region, a peer saw an edit after a median of 303ms —
+    # right where typing stops feeling live. Singapore is the nearest region
+    # Render offers to South Asia.
+    #
+    # Render fixes a service's region at creation, so changing this means
+    # creating a new service rather than editing an existing one.
+    region: singapore
     rootDir: server
     buildCommand: npm ci
     startCommand: npm start

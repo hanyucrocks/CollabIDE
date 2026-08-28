@@ -386,6 +386,14 @@ the editor is offscreen or the browser is not compositing. Both mistakes look
 exactly like "sync is broken". Read `editor.getModel().getValue()`, or assert
 against the `Y.Text` instead.
 
+## Latency
+
+The sync server sits in the path of every keystroke, so its distance from your
+users is what they experience as lag. Measured from India against Render's
+default Oregon region: a peer saw an edit after a median of **303ms**, p90
+360ms. `render.yaml` pins the region to Singapore for that reason; see
+[DEPLOYMENT.md](DEPLOYMENT.md) for why moving one is not a config change.
+
 ## Known limitations
 
 Deliberate scope boundaries, not surprises.

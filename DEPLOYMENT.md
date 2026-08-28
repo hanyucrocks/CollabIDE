@@ -122,6 +122,33 @@ may still report itself connected for several seconds. The guarantee — that a
 demoted member cannot write — holds throughout; only the client's awareness of
 the close lags.
 
+## Pick a region near your users
+
+`render.yaml` pins the API to **Singapore**. This matters more than it looks:
+the sync server is in the path of every keystroke, so the round trip to it is
+what people feel as lag.
+
+Measured from India against Render's default Oregon region, an edit reached the
+other person after a median of **303ms** (p90 360ms). Under roughly 100ms feels
+instant; past 300ms typing stops feeling live, and the interleaving below starts
+showing up.
+
+Render fixes a service's region when it is created, so moving means creating a
+new service and repointing three things at it: `VITE_API_URL` on Vercel,
+`CLIENT_ORIGIN` on Render, and the GitHub OAuth callback URL.
+
+MongoDB's region matters far less. Yjs updates never touch the database — only
+snapshot writes and the initial room load do — so Atlas latency shows up when
+opening a room, not while typing.
+
+### Why laggy typing garbles text
+
+With a slow link, two people editing the same line each type into what they see
+as the same position, and the CRDT interleaves both — `cout` and `int n` become
+`couint`. That is Yjs behaving correctly: it preserves both edits rather than
+discarding one. It is not a sync bug, and it becomes rare once the round trip is
+short enough that people see each other's text before typing over it.
+
 ## Free-tier realities
 
 **Render free services sleep after ~15 minutes of inactivity.** Every WebSocket
