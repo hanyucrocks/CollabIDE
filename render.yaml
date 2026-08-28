@@ -5,7 +5,9 @@
 # requires and pure-serverless hosts do not provide.
 services:
   - type: web
-    name: collabide-api
+    # Renamed so the blueprint creates a new service rather than trying to
+    # modify the existing one — a region cannot be changed in place.
+    name: collabide-api-sg
     runtime: node
     plan: free
     # Every keystroke crosses this distance twice. Measured from India against
