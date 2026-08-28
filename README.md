@@ -1,17 +1,51 @@
-# CollabIDE — Weeks 1–2 (in progress)
+# CollabIDE
 
-Real-time multiplayer code editor. Two browser tabs edit the same room's
-document through CRDT sync, authenticated, in a Monaco editor with live remote
-cursors.
+Real-time collaborative code editor. Several people edit the same file in one
+room, see each other's cursors, and run the code together with shared output.
 
-**Week 1 (done):** auth, rooms, JWT-gated Yjs WebSocket sync, plain `<textarea>`.
-**Week 2:** Monaco + y-monaco, presence/cursors via Yjs awareness, binary
-snapshot persistence, server-side `viewer` enforcement, invite links.
-**Week 3 (in progress):** Judge0 execution and rate limiting.
+**Live: https://collab-ide-three.vercel.app**
 
-Deployed: frontend on Vercel, API on Render, database on MongoDB Atlas.
+Sign up, create a room, send someone the invite link. No install, no setup.
 
-Still absent, by design: permissions UI, multi-file rooms.
+MERN + Yjs for CRDT sync over WebSocket + Monaco + Judge0 for execution.
+Frontend on Vercel, API and sync server on Render, MongoDB Atlas for storage.
+
+## What's interesting here
+
+**Sync is a CRDT, not operational transform.** Yjs guarantees convergence
+mathematically, with no central server sequencing and transforming edits. The
+tradeoff — trusting a library's correctness rather than owning the merge — is
+the one worth making, because correct OT is notoriously hard and it is not what
+this project is about.
+
+**The editor came second, deliberately.** Sync was proven against a plain
+`<textarea>` before Monaco went anywhere near it, so a sync bug could not hide
+behind an editor's own buffering. That ordering earned its keep immediately: it
+exposed a Yjs v13/v14 mismatch between client and server that fails *silently* —
+the handshake completes, the client reports `synced: true`, the auth gate
+passes, and no update ever applies. With Monaco already in place that would have
+had three plausible suspects instead of one.
+
+**Execution results travel through the document.** Output is written into the
+room's `Y.Doc` rather than through a second WebSocket message type, so it
+reaches every peer over the connection that already exists, needs no protocol
+change on either side, and a late joiner sees the last run without asking for it.
+
+**Cross-tab sync is switched off on purpose.** Two tabs in one browser would
+otherwise sync directly through `BroadcastChannel`, which means the two-tab test
+would pass with the server stopped. Forcing every update through the socket is
+what makes that test mean anything.
+
+**54 tests drive the real HTTP and WebSocket server** — no mocks. Token rotation
+and replay rejection, CRDT convergence under simultaneous edits at the same
+offset, reconnection with neither loss nor duplication, snapshot persistence
+across a restart, and role enforcement at the protocol level. CI runs them
+against a real MongoDB on every push.
+
+## Status
+
+All seven V1 user stories are implemented and the five success criteria are met.
+Known gaps are listed at the end, and none of them are secret.
 
 ## Layout
 
@@ -56,9 +90,9 @@ cd server && npm run dev     # http://localhost:4000
 cd client && npm run dev     # http://localhost:5173
 ```
 
-## Milestone 6 — the two-tab test
+## Trying the collaboration by hand
 
-The point of Week 1. Do it in **two different browser profiles** (or one normal
+Do it in **two different browser profiles** (or one normal
 window and one private window), so the two tabs hold two different logged-in
 users rather than sharing one session.
 
@@ -96,7 +130,7 @@ sleeps are calibrated to whichever machine they were written on, and running
 the same suite against a deployed server puts network and database latency
 straight through them.
 
-This drives the real HTTP and WebSocket server and checks the Week 1 milestones:
+This drives the real HTTP and WebSocket server and checks:
 token rotation and replay rejection, room membership and roles, the WebSocket
 auth gate, and — the part that matters — that two independent Yjs clients
 editing at the same offset simultaneously converge with neither write lost.
@@ -305,7 +339,7 @@ build a fresh document from the *previous* snapshot and silently lose the edits
 still being written. Fixed by tracking in-flight writes per room and having any
 subsequent load await them.
 
-## Week 1 decisions worth knowing
+## Decisions worth knowing
 
 - **The invite link is owner-only.** Editors and viewers do not receive
   `inviteToken` in API responses, so they cannot invite others.
@@ -313,9 +347,9 @@ subsequent load await them.
   a member afterwards, not at join time.
 - **`GET /api/rooms`** (list your rooms) is not in the literal milestone list. It
   is included because without it a room id is only ever visible once, at creation.
-- **WS membership check** goes slightly beyond "reject handshake without valid
-  token", for the reason above. Role is *recorded* but not yet *enforced* — a
-  `viewer` can still write. Enforcement is Week 2's permissions work.
+- **The WebSocket gate checks membership, not just token validity.** A valid JWT
+  proves who you are, not that you belong in a room; without this any logged-in
+  user could sync any room's document.
 
 ## Verified
 
@@ -352,19 +386,16 @@ the editor is offscreen or the browser is not compositing. Both mistakes look
 exactly like "sync is broken". Read `editor.getModel().getValue()`, or assert
 against the `Y.Text` instead.
 
-## Known Week 1 limitations
+## Known limitations
 
-These are scope boundaries, not bugs — each is a later week's work.
+Deliberate scope boundaries, not surprises.
 
 - **An unclean kill can lose up to 30s of edits.** Snapshots are debounced, and
   `SIGKILL` or a crash skips the shutdown flush. `SIGINT`/`SIGTERM` are handled.
-- **Snapshots are never pruned.** A room's row persists after the room stops
-  being used; stale-room cleanup is a later concern.
 - **The access token travels as a WebSocket query parameter.** Browsers cannot
   set headers on a WS handshake. Query strings are prone to ending up in logs;
   the token is short-lived, which limits but does not remove the exposure.
 - **The refresh token is in `localStorage`**, so it is reachable by any XSS.
-- **No rate limiting** on any endpoint, including signup and login.
 - **No ownership transfer.** The owner's role is fixed, so a room cannot be
   handed over or its owner demoted.
 - **The client has no test runner.** Server behaviour is covered by the smoke
