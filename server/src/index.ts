@@ -4,7 +4,7 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { docs } from '@y/websocket-server/utils';
 import { env, isAllowedOrigin } from './config/env.ts';
-import { connectDb } from './db/connect.ts';
+import { connectDb, dbState, isDbConnected } from './db/connect.ts';
 import { authRouter } from './routes/auth.ts';
 import { roomsRouter } from './routes/rooms.ts';
 import { errorHandler, notFound } from './middleware/errors.ts';
@@ -33,8 +33,12 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 
+// Always 200 while the process is alive. Reporting the database as unhealthy
+// here would make the platform restart the instance over a transient Atlas
+// blip, when the right response is to keep serving and let the retry loop
+// reconnect. `db` is for humans debugging, not for the health check.
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, db: dbState(), uptime: Math.round(process.uptime()) });
 });
 
 app.use('/api/auth', authRouter);
@@ -47,16 +51,19 @@ app.use(errorHandler);
 const server = http.createServer(app);
 attachYjsWebsocket(server);
 
-await connectDb();
-
 // Must be registered before any document is created, so the first client to
 // open a room gets its stored state rather than an empty doc.
 enableSnapshotPersistence();
 
+// Listen first, connect second. Binding the port immediately means a platform
+// health check succeeds while the database connection is still being
+// established, rather than being refused and taken as a dead instance.
 server.listen(env.port, () => {
   console.log(`[server] ${env.nodeEnv}, listening on :${env.port}`);
   console.log(`[server] allowed origins: ${env.clientOrigins.join(', ')}`);
 });
+
+void connectDb();
 
 // Snapshots are debounced, so an abrupt exit can drop up to MAX_WAIT_MS of
 // edits. On a signal, write the pending ones out before going away.
@@ -81,3 +88,15 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+// Without these, an unexpected failure ends the process with nothing in the
+// logs explaining why — which on a platform that silently restarts the
+// instance is the hardest kind of production problem to diagnose.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaught exception:', err);
+  void shutdown('uncaughtException');
+});
