@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { getAccessToken } from './api.ts';
-
-const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:4000/yjs';
+import { WS_URL } from './config.ts';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 

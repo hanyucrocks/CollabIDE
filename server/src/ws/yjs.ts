@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { setupWSConnection } from '@y/websocket-server/utils';
+import { isAllowedOrigin } from '../config/env.ts';
 import { verifyAccessToken } from '../lib/tokens.ts';
 import { loadRoomForMember, touchRoom } from '../lib/rooms.ts';
 import { ensureDocLoaded } from '../lib/persistence.ts';
@@ -81,6 +82,15 @@ export function attachYjsWebsocket(server: Server): void {
 
       if (!url.pathname.startsWith(WS_PATH_PREFIX)) {
         reject(socket, 404, 'Not Found');
+        return;
+      }
+
+      // CORS does not apply to WebSockets, so the browser will happily let any
+      // page open one. The JWT is the real gate; this just refuses obviously
+      // foreign origins. Non-browser clients send no Origin and are unaffected.
+      if (!isAllowedOrigin(req.headers.origin)) {
+        console.warn(`[ws] rejected origin ${req.headers.origin}`);
+        reject(socket, 403, 'Forbidden');
         return;
       }
 

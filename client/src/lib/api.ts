@@ -1,4 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+import { API_URL } from './config.ts';
+
 const REFRESH_STORAGE_KEY = 'collabide.refreshToken';
 
 export type Role = 'owner' | 'editor' | 'viewer';
