@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, build and smoke test
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Throwaway values. Real secrets live in the hosting platform; nothing
+      # here touches production.
+      MONGO_URI: mongodb://127.0.0.1:27017/collabide_ci
+      JWT_ACCESS_SECRET: ci-access-secret-not-used-anywhere-else
+      JWT_REFRESH_SECRET: ci-refresh-secret-not-used-anywhere-else
+      CLIENT_ORIGIN: http://localhost:5173
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The server runs TypeScript through Node's native type stripping, which
+      # is only unflagged from 23.6 on. An older Node fails at startup rather
+      # than at install, so pinning this matters.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Typecheck server
+        working-directory: server
+        run: npm run typecheck
+
+      # Runs tsc and vite build, which is what the deploy host runs. This is
+      # the step that would have caught the vite.config.ts type error that
+      # reached Vercel.
+      - name: Build client
+        working-directory: client
+        env:
+          VITE_API_URL: http://localhost:4000
+        run: npm run build
+
+      - name: Start API
+        working-directory: server
+        run: |
+          # nohup so the server survives this step's shell exiting; later
+          # steps run in their own shell but the same job.
+          nohup npm start > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/api/health > /dev/null; then
+              echo "API up after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API failed to start"
+          cat /tmp/api.log
+          exit 1
+
+      # Drives the real HTTP and WebSocket server: auth and token rotation,
+      # room roles, the WebSocket auth gate, CRDT convergence under concurrent
+      # edits, reconnection, and snapshot persistence.
+      - name: Smoke test
+        working-directory: server
+        run: npm run smoke
+
+      - name: API logs
+        if: failure()
+        run: cat /tmp/api.log
