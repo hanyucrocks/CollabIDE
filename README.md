@@ -136,6 +136,16 @@ treated as theft and drops every session for that user.
 is verified *before* the connection is accepted. Membership is checked too, not
 just token validity — otherwise any logged-in user could sync any room.
 
+**Invites.** A room is shared as a link, `#/join/<inviteToken>`, not as a token
+to paste — PRD story 1 asks for a shareable link, and a copied token that has to
+be pasted into a form is a second manual step.
+
+The hash is untouched by signing in, so someone opening an invite without an
+account sees the auth panel (defaulted to sign-up, since that is the likely
+case), and lands in the room the moment they have one. Nothing needs to be
+stashed anywhere to survive the login. The lobby's join field still accepts a
+bare token as well as a full link, because people paste both.
+
 **Roles.** `PATCH /api/rooms/:id/members/:userId` lets the owner move a member
 between `editor` and `viewer`. Owners are excluded: demoting one would leave the
 room unmanageable, and ownership transfer is a separate operation that does not
@@ -187,8 +197,8 @@ subsequent load await them.
 
 ## Week 1 decisions worth knowing
 
-- **`inviteToken` is owner-only.** Editors and viewers do not receive it in API
-  responses, so they cannot invite others.
+- **The invite link is owner-only.** Editors and viewers do not receive
+  `inviteToken` in API responses, so they cannot invite others.
 - **Joining always grants `editor`.** A viewer is created by the owner demoting
   a member afterwards, not at join time.
 - **`GET /api/rooms`** (list your rooms) is not in the literal milestone list. It
@@ -247,6 +257,11 @@ These are scope boundaries, not bugs — each is a later week's work.
 - **No rate limiting** on any endpoint, including signup and login.
 - **No permissions UI.** Role changes go through the API only; there is no
   control in the room view yet.
+- **The client has no test runner.** Server behaviour is covered by the smoke
+  suite, but client-side logic — `lib/invite.ts`, the caret and cursor handling
+  in `CodeEditor.tsx` — is only verified by driving a browser. Worth adding
+  Vitest before that logic grows.
+- **An invite link cannot be rotated** from the UI, though the schema allows it.
 - **A blocked viewer write is dropped silently.** The viewer's own replica keeps
   the local edit until it reconnects and resyncs. Since their editor is
   read-only this needs a deliberate effort to reach, but the server does not

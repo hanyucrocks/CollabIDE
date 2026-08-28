@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth.tsx';
 
-export function AuthPanel() {
+export function AuthPanel({ invited = false }: { invited?: boolean }) {
   const { login, signup } = useAuth();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  // Someone arriving on an invite link almost certainly has no account yet.
+  const [mode, setMode] = useState<'login' | 'signup'>(invited ? 'signup' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,13 @@ export function AuthPanel() {
   return (
     <div className="card centered">
       <h1>CollabIDE</h1>
-      <p className="muted">{mode === 'login' ? 'Sign in to continue' : 'Create an account'}</p>
+      <p className="muted">
+        {invited
+          ? "You've been invited to a room — sign in to open it"
+          : mode === 'login'
+            ? 'Sign in to continue'
+            : 'Create an account'}
+      </p>
 
       <form onSubmit={submit}>
         <label>
