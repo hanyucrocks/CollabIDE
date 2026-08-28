@@ -78,22 +78,72 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     editorRef.current?.updateOptions({ readOnly });
   }, [readOnly]);
 
-  // Bind the shared Y.Text to Monaco's model. y-monaco owns the diffing and
-  // the relative-position bookkeeping that keeps remote cursors anchored to
-  // characters rather than to offsets.
+  /*
+   * Bind the shared Y.Text to Monaco's model.
+   *
+   * Monaco normalises line endings in whatever content it is given; Y.Text
+   * does not. A document containing \r\n therefore yields a model one
+   * character shorter per line than the document believes, every offset past
+   * the first line disagrees, and edits land somewhere other than where they
+   * were typed — text appearing on the wrong line, drifting further down the
+   * file. That is the failure this guards against.
+   *
+   * Healing after the binding exists does not work: the deletes are expressed
+   * in document offsets and applied at the model's, so they remove the wrong
+   * characters. It has to happen while nothing is bound.
+   */
   useEffect(() => {
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model || !provider) return;
 
-    const binding = new MonacoBinding(
-      ydoc.getText('code'),
-      model,
-      new Set([editor]),
-      provider.awareness,
-    );
+    const ytext = ydoc.getText('code');
+    let binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
+    let cancelled = false;
 
-    return () => binding.destroy();
+    /** Indices of the \r in every \r\n pair — always a line ending. */
+    const findStrays = (): number[] => {
+      const content = ytext.toString();
+      const found: number[] = [];
+      for (let i = 0; i < content.length - 1; i++) {
+        if (content[i] === '\r' && content[i + 1] === '\n') found.push(i);
+      }
+      return found;
+    };
+
+    /*
+     * Runs once the initial sync has landed, which is the first moment the
+     * document's real contents are known — before it, there is nothing to
+     * inspect and the check would pass vacuously.
+     *
+     * The binding is deliberately torn down and rebuilt around the edit rather
+     * than deferred until after it. Leaving the editor unbound while waiting
+     * for a sync that may never arrive would silently discard anything typed
+     * in the meantime.
+     */
+    const normalise = () => {
+      if (cancelled) return;
+
+      const strays = findStrays();
+      model.setEOL(monaco.editor.EndOfLineSequence.LF);
+      if (!strays.length) return;
+
+      binding.destroy();
+      ydoc.transact(() => {
+        // Backwards, so each deletion leaves the earlier indices valid.
+        for (let i = strays.length - 1; i >= 0; i--) ytext.delete(strays[i], 1);
+      });
+      binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
+      model.setEOL(monaco.editor.EndOfLineSequence.LF);
+    };
+
+    if (provider.synced) normalise();
+    else provider.once('sync', normalise);
+
+    return () => {
+      cancelled = true;
+      binding.destroy();
+    };
   }, [ydoc, provider]);
 
   /*

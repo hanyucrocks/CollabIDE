@@ -169,6 +169,25 @@ locks the major, so `^0.1.1` resolves straight back to `0.1.5` and reintroduces
 the bug. `npm ls yjs` should report a single deduped `yjs@13.6.32` — if it ever
 shows two versions, sync is broken regardless of what the UI says.
 
+**Line endings.** Monaco normalises line endings in whatever content it is
+given; `Y.Text` does not. A document holding `\r\n` therefore produces a model
+one character shorter per line than the document believes, every offset past the
+first line disagrees, and edits land somewhere other than where they were typed
+— text appearing on the wrong line, drifting further down the file.
+
+One collaborator on Windows, or one paste of Windows-terminated code, is enough
+to put `\r` into a room and corrupt it for everyone. `CodeEditor.tsx` strips the
+`\r` of every `\r\n` pair once the initial sync lands, then pins the model to
+LF so this client cannot reintroduce them.
+
+The ordering is load-bearing and was wrong twice before it was right. Healing
+after the binding exists does not work: the deletes are expressed in document
+offsets and applied at the model's, so they remove the wrong characters —
+reproducing the exact corruption they were meant to cure. The binding is
+therefore destroyed around the edit and rebuilt, rather than the edit being
+deferred until after it, because leaving the editor unbound while waiting for a
+sync that may never arrive would silently discard anything typed meanwhile.
+
 **Editor binding.** `client/src/lib/useCollabDoc.ts` owns the Y.Doc and the
 socket and knows nothing about Monaco; `client/src/components/CodeEditor.tsx`
 binds the room's `Y.Text` to Monaco's model with `y-monaco`. y-monaco keeps
