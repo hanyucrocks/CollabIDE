@@ -161,21 +161,34 @@ never swept. Set `ROOM_TTL_DAYS` to change the window or `0` to turn it off.
 
 ## Enabling code execution
 
-Execution is stubbed until `JUDGE0_API_KEY` is set. Subscribe to the free tier
-of [Judge0 CE on RapidAPI](https://rapidapi.com/judge0-official/api/judge0-ce)
-and add the key on **Render**:
+Execution is stubbed until `JUDGE0_URL` is set. That one variable decides
+whether runs are real; a key is only needed by deployments that ask for one.
+
+**Public Judge0 instance** — no account, no key:
 
 | Variable | Value |
 | --- | --- |
+| `JUDGE0_URL` | `https://ce.judge0.com` |
+
+**RapidAPI gateway** — if you have a key:
+
+| Variable | Value |
+| --- | --- |
+| `JUDGE0_URL` | `https://judge0-ce.p.rapidapi.com` |
 | `JUDGE0_API_KEY` | your RapidAPI key |
 
-Set it on the API service, never as a `VITE_*` variable. Anything with that
-prefix is compiled into the browser bundle, where it is readable by every
-visitor. The client asks *this* API to run code; only the server talks to
-Judge0.
+Set these on the API service, never as `VITE_*` variables. Anything with that
+prefix is compiled into the browser bundle, where every visitor can read it.
+The client asks *this* API to run code; only the server talks to Judge0.
 
-Until the key is set, runs return a labelled stub result rather than failing,
-so the rest of the app can be demonstrated without one.
+`ce.judge0.com` is a public instance run by the Judge0 maintainers. It is
+best-effort: no SLA, undocumented limits, and it could throttle or disappear.
+That is a reasonable trade for a demo and a poor one for anything that depends
+on it — if this becomes more than a demo, either pay for the hosted service or
+self-host, which the TRD already names as the V2 direction.
+
+Until `JUDGE0_URL` is set, runs return a labelled stub rather than failing, so
+the rest of the app can be shown without any execution service.
 
 ## Not yet handled
 - **The access token travels as a WebSocket query parameter**, because browsers

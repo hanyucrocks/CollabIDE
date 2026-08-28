@@ -48,7 +48,7 @@ export function isSupportedLanguage(language: string): boolean {
 }
 
 export function isStubbed(): boolean {
-  return !env.judge0ApiKey;
+  return !env.judge0Url;
 }
 
 function truncate(value: string | null | undefined): string {
@@ -60,11 +60,24 @@ function truncate(value: string | null | undefined): string {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function headers(): Record<string, string> {
-  return {
-    'content-type': 'application/json',
-    'X-RapidAPI-Key': env.judge0ApiKey,
-    'X-RapidAPI-Host': env.judge0Host,
-  };
+  const base: Record<string, string> = { 'content-type': 'application/json' };
+
+  // Only the RapidAPI gateway wants credentials. A directly-hosted Judge0
+  // takes none, and sending empty auth headers to one is worse than sending
+  // nothing.
+  if (env.judge0ApiKey) {
+    base['X-RapidAPI-Key'] = env.judge0ApiKey;
+    base['X-RapidAPI-Host'] = env.judge0Host;
+  }
+
+  return base;
+}
+
+const encode = (text: string) => Buffer.from(text, 'utf8').toString('base64');
+
+function decode(value: string | null | undefined): string {
+  if (!value) return '';
+  return Buffer.from(value, 'base64').toString('utf8');
 }
 
 /**
@@ -77,14 +90,22 @@ function headers(): Record<string, string> {
 async function runOnJudge0(language: string, source: string): Promise<ExecOutcome> {
   const startedAt = Date.now();
 
+  /*
+   * base64 throughout, not plain text. Judge0 refuses to return a submission
+   * whose output is not valid UTF-8 — it answers with an error object instead
+   * of a result — and compiler diagnostics routinely are not. In plain mode a
+   * C++ compile error is unreadable to this client, which polls a submission
+   * that never reports a status and eventually calls it a timeout. The user
+   * sees "execution timed out" for what is really a syntax error.
+   */
   const created = await fetch(
-    `${env.judge0Url}/submissions?base64_encoded=false&wait=false`,
+    `${env.judge0Url}/submissions?base64_encoded=true&wait=false`,
     {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
         language_id: LANGUAGE_IDS[language],
-        source_code: source,
+        source_code: encode(source),
       }),
     },
   );
@@ -110,7 +131,7 @@ async function runOnJudge0(language: string, source: string): Promise<ExecOutcom
     await sleep(POLL_INTERVAL_MS);
 
     const res = await fetch(
-      `${env.judge0Url}/submissions/${token}?base64_encoded=false`,
+      `${env.judge0Url}/submissions/${token}?base64_encoded=true`,
       { headers: headers() },
     );
     if (!res.ok) continue;
@@ -127,10 +148,10 @@ async function runOnJudge0(language: string, source: string): Promise<ExecOutcom
     if (!body.status || body.status.id < STATUS_IN_PROGRESS) continue;
 
     // A compile failure carries its message in compile_output, not stderr.
-    const stderr = body.stderr?.trim() ? body.stderr : (body.compile_output ?? '');
+    const stderr = decode(body.stderr) || decode(body.compile_output);
 
     return {
-      stdout: truncate(body.stdout),
+      stdout: truncate(decode(body.stdout)),
       stderr: truncate(stderr),
       exitCode: body.exit_code ?? null,
       status: body.status.description,

@@ -216,9 +216,18 @@ and a late joiner sees the last run because it syncs like any other document
 content. Only the newest run is kept, so the cost to a snapshot is bounded, and
 output is truncated at 8,000 characters.
 
-Without `JUDGE0_API_KEY` the server falls back to a clearly-labelled stub, so
-local development and CI work without a key and no result ever pretends to have
-run.
+`JUDGE0_URL` alone decides whether execution is real; unset means a
+clearly-labelled stub, so local development and CI need no external service and
+no result ever pretends to have run. `JUDGE0_API_KEY` is sent only when set,
+because a directly-hosted Judge0 takes no credentials while the RapidAPI
+gateway does.
+
+Submissions are base64-encoded in both directions. Judge0 refuses to return a
+submission whose output is not valid UTF-8, answering with an error object
+instead of a result — and compiler diagnostics routinely are not. In plain-text
+mode a C++ compile error is invisible to the client, which polls a submission
+that never reports a status and eventually calls it a timeout, so a syntax error
+surfaces to the user as "execution timed out".
 
 **Snapshot size.** MongoDB caps a document at 16MB and a Yjs snapshot is stored
 inside one, so there is a real ceiling. Snapshots are gzipped, and a state that

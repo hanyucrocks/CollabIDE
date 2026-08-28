@@ -63,7 +63,18 @@ export const env = {
   snapshotMaxBytes: Number(process.env.SNAPSHOT_MAX_BYTES ?? 12 * 1024 * 1024),
   snapshotWarnBytes: Number(process.env.SNAPSHOT_WARN_BYTES ?? 4 * 1024 * 1024),
 
-  judge0Url: process.env.JUDGE0_URL ?? 'https://judge0-ce.p.rapidapi.com',
+  /*
+   * JUDGE0_URL alone decides whether execution is real: unset means the stub,
+   * which keeps local development and CI working with no external service. It
+   * deliberately has no default — defaulting to a provider would make an
+   * unconfigured server attempt real calls and fail with an auth error rather
+   * than fall back to the stub.
+   *
+   * The key is optional because not every Judge0 deployment wants one: a
+   * public instance takes no credentials, the RapidAPI gateway does. When set
+   * it is a server-side secret and must never reach the client.
+   */
+  judge0Url: (process.env.JUDGE0_URL ?? '').replace(/\/+$/, ''),
   judge0ApiKey: process.env.JUDGE0_API_KEY ?? '',
   judge0Host: process.env.JUDGE0_HOST ?? 'judge0-ce.p.rapidapi.com',
 };
