@@ -50,21 +50,44 @@ async function call(
   return { status: res.status, body: text ? JSON.parse(text) : {} };
 }
 
+const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const email = (tag: string) => `${tag}-${crypto.randomUUID().slice(0, 8)}@collabide.test`;
 
+/**
+ * Creates a throwaway account, backing off if the auth limiter refuses.
+ *
+ * This is fixture setup, not an assertion — the rate limit is verified by its
+ * own test. Honouring Retry-After here is also what a well-behaved client does,
+ * and it lets the suite run twice in a row without waiting out the window by
+ * hand after the flood test has exhausted it.
+ */
 async function newUser(tag: string) {
   const address = email(tag);
-  const { status, body } = await call('/api/auth/signup', {
-    method: 'POST',
-    body: { email: address, password: 'correct-horse-battery' },
-  });
-  assert.equal(status, 201, `signup failed: ${JSON.stringify(body)}`);
-  return { email: address, ...body } as {
-    email: string;
-    user: Json;
-    accessToken: string;
-    refreshToken: string;
-  };
+
+  for (let attempt = 0; ; attempt++) {
+    const { status, body } = await call('/api/auth/signup', {
+      method: 'POST',
+      body: { email: address, password: 'correct-horse-battery' },
+    });
+
+    if (status === 201) {
+      return { email: address, ...body } as {
+        email: string;
+        user: Json;
+        accessToken: string;
+        refreshToken: string;
+      };
+    }
+
+    if (status !== 429 || attempt >= 2) {
+      assert.equal(status, 201, `signup failed: ${JSON.stringify(body)}`);
+    }
+
+    const waitSeconds = Number(body.retryAfter ?? 5) + 1;
+    console.log(`  … rate limited, waiting ${waitSeconds}s before retrying signup`);
+    await settle(waitSeconds * 1000);
+  }
 }
 
 /** Resolves once the provider reports a completed initial sync. */
@@ -95,7 +118,6 @@ function connect(roomId: string, token: string) {
   return { doc, provider, text: doc.getText('code') };
 }
 
-const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Polls until a condition holds, or gives up. Returns whether it held. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -389,6 +411,144 @@ async function main() {
     a.provider.destroy();
     b.provider.destroy();
   }
+
+  console.log('\nWeek 3 — code execution');
+
+  const execRoom = (
+    await call('/api/rooms', {
+      method: 'POST',
+      body: { name: 'Exec', language: 'javascript' },
+      token: alice.accessToken,
+    })
+  ).body.room as Json;
+
+  await call('/api/rooms/join', {
+    method: 'POST',
+    body: { inviteToken: execRoom.inviteToken },
+    token: bob.accessToken,
+  });
+
+  const execMeta = (await call('/api/rooms/meta/exec')).body as Json;
+  if (execMeta.stubbed) {
+    console.log('  (no JUDGE0_API_KEY — exercising the stub executor)');
+  }
+
+  /** Waits out the 1-run-per-3s limiter so the next call is not throttled. */
+  const cooldown = () => settle(3200);
+
+  await test('running requires authentication', async () => {
+    const { status } = await call(`/api/rooms/${execRoom.id}/exec`, { method: 'POST' });
+    assert.equal(status, 401);
+  });
+
+  await test('a non-member cannot run code in a room', async () => {
+    const stranger = await newUser('stranger');
+    const { status } = await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: stranger.accessToken,
+    });
+    assert.equal(status, 404);
+  });
+
+  await test('an editor can run the room\'s code', async () => {
+    const writer = connect(execRoom.id, alice.accessToken);
+    try {
+      await whenSynced(writer.provider, 'writer');
+      writer.text.insert(0, 'console.log("hello from the room");\n');
+      await settle(600);
+
+      await cooldown();
+      const { status, body } = await call(`/api/rooms/${execRoom.id}/exec`, {
+        method: 'POST',
+        token: alice.accessToken,
+      });
+
+      assert.equal(status, 200, JSON.stringify(body));
+      assert.ok(body.result, 'expected a result payload');
+      assert.equal(typeof body.result.durationMs, 'number');
+    } finally {
+      writer.provider.destroy();
+      await settle(1200);
+    }
+  });
+
+  await test('the result is broadcast to everyone in the room', async () => {
+    const watcher = connect(execRoom.id, bob.accessToken);
+    try {
+      await whenSynced(watcher.provider, 'watcher');
+      await settle(600);
+
+      const exec = watcher.doc.getMap('exec');
+
+      await cooldown();
+      await call(`/api/rooms/${execRoom.id}/exec`, {
+        method: 'POST',
+        token: alice.accessToken,
+      });
+
+      // The peer never called the endpoint: anything it sees arrived over the
+      // document sync, which is the point of publishing results that way.
+      const finished = await waitFor(() => exec.get('status') === 'done', 25_000);
+
+      assert.ok(finished, `expected a finished run, saw "${exec.get('status')}"`);
+      assert.equal(exec.get('runBy'), alice.user.id, 'result should name who ran it');
+      assert.equal(typeof exec.get('stdout'), 'string');
+    } finally {
+      watcher.provider.destroy();
+      await settle(1200);
+    }
+  });
+
+  await test('a viewer cannot run code', async () => {
+    await call(`/api/rooms/${execRoom.id}/members/${bob.user.id}`, {
+      method: 'PATCH',
+      body: { role: 'viewer' },
+      token: alice.accessToken,
+    });
+
+    await cooldown();
+    const { status } = await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: bob.accessToken,
+    });
+    assert.equal(status, 403);
+
+    await call(`/api/rooms/${execRoom.id}/members/${bob.user.id}`, {
+      method: 'PATCH',
+      body: { role: 'editor' },
+      token: alice.accessToken,
+    });
+  });
+
+  await test('execution is rate limited to one run per 3 seconds', async () => {
+    await cooldown();
+
+    const first = await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: alice.accessToken,
+    });
+    const second = await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: alice.accessToken,
+    });
+
+    assert.equal(first.status, 200, 'the first run should be allowed');
+    assert.equal(second.status, 429, 'an immediate second run should be refused');
+    assert.ok(second.body.retryAfter >= 1, 'a 429 should say when to retry');
+  });
+
+  await test('the limit is per user, not global', async () => {
+    await cooldown();
+
+    // alice consumes her window; bob's must be unaffected.
+    await call(`/api/rooms/${execRoom.id}/exec`, { method: 'POST', token: alice.accessToken });
+    const bobRun = await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: bob.accessToken,
+    });
+
+    assert.equal(bobRun.status, 200, "one user's limit must not block another");
+  });
 
   console.log('\nPRD criterion — reconnect without data loss');
 
@@ -849,6 +1009,23 @@ async function main() {
     ))?.version as number;
 
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
+  });
+
+  console.log('\nWeek 3 — auth abuse limits');
+
+  // Deliberately last: this exhausts the shared per-address window, so any
+  // test needing to sign up or log in must already have run.
+  await test('signup and login are rate limited', async () => {
+    // The limiter allows 30 attempts per 15 minutes per address; walk past it.
+    let sawLimit = false;
+    for (let i = 0; i < 40 && !sawLimit; i++) {
+      const { status } = await call('/api/auth/login', {
+        method: 'POST',
+        body: { email: `flood-${i}@collabide.test`, password: 'wrong-password-here' },
+      });
+      if (status === 429) sawLimit = true;
+    }
+    assert.ok(sawLimit, 'repeated login attempts should eventually be refused');
   });
 
   // Every run creates throwaway accounts and rooms; without this they pile up

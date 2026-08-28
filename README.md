@@ -5,11 +5,13 @@ document through CRDT sync, authenticated, in a Monaco editor with live remote
 cursors.
 
 **Week 1 (done):** auth, rooms, JWT-gated Yjs WebSocket sync, plain `<textarea>`.
-**Week 2 (in progress):** Monaco + y-monaco, presence/cursors via Yjs awareness,
-binary snapshot persistence, server-side `viewer` enforcement.
+**Week 2:** Monaco + y-monaco, presence/cursors via Yjs awareness, binary
+snapshot persistence, server-side `viewer` enforcement, invite links.
+**Week 3 (in progress):** Judge0 execution and rate limiting.
 
-Still absent, by design: permissions UI, Judge0 execution, rate limiting,
-deployment.
+Deployed: frontend on Vercel, API on Render, database on MongoDB Atlas.
+
+Still absent, by design: permissions UI, multi-file rooms.
 
 ## Layout
 
@@ -192,6 +194,38 @@ member's open sockets and lets the client reconnect with its new role. The close
 uses code 1000 on purpose: y-websocket treats 4400-4499 as permanent and would
 stop reconnecting.
 
+**Execution.** `POST /api/rooms/:id/exec` runs the room's code through Judge0.
+The source is read from the *server's* copy of the document, not from the
+request body, so everyone runs exactly what is on screen and a client cannot
+execute something the room cannot see. Owners and editors may run; viewers may
+not.
+
+Results are published into the room's `Y.Doc` under an `exec` map rather than
+through a second WebSocket message type. They therefore reach every peer over
+the connection that already exists, with no protocol changes on either side,
+and a late joiner sees the last run because it syncs like any other document
+content. Only the newest run is kept, so the cost to a snapshot is bounded, and
+output is truncated at 8,000 characters.
+
+Without `JUDGE0_API_KEY` the server falls back to a clearly-labelled stub, so
+local development and CI work without a key and no result ever pretends to have
+run.
+
+**Rate limiting.** `server/src/middleware/rateLimit.ts`. Execution is capped at
+one run per user per three seconds — it spends a third-party quota and runs
+untrusted code, so it is the one path with a hard limit. Auth is capped at 20
+attempts per address per minute.
+
+The auth window is deliberately short and self-healing rather than long and
+punitive: a 15-minute window locked out anything legitimately creating several
+accounts from one address, including an office behind one NAT and this repo's
+own test suite. It bounds abuse; it does not eliminate it, and a deployment
+fronting real users should add a stricter signup-specific limit or a challenge.
+
+The limiter is in-process, which is correct for a single instance and wrong for
+several — behind two instances the effective limit doubles. A shared store is
+the first thing to add if the deployment scales out.
+
 **Persistence.** `server/src/lib/persistence.ts`. One `doc_snapshots` row per
 room, holding `Y.encodeStateAsUpdate` output as a Buffer and updated in place;
 `version` is a monotonic save counter. Keeping only the current state is the
@@ -238,7 +272,7 @@ subsequent load await them.
 
 ## Verified
 
-`npm run smoke` passes 39/39 against the live server, and the browser path was
+`npm run smoke` passes 47/47 against the live server, and the browser path was
 driven end-to-end in Monaco: two users in two tabs, an edit in one reaching the
 other through the server, with remote cursors labelled and syntax highlighting
 active.

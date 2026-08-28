@@ -3,14 +3,30 @@ import { RoomModel } from '../models/Room.ts';
 import { HttpError } from '../middleware/errors.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import { newInviteToken } from '../lib/tokens.ts';
-import { loadRoomForMember, serializeRoom } from '../lib/rooms.ts';
+import { loadRoomForMember, serializeRoom, touchRoom } from '../lib/rooms.ts';
 import { disconnectMember } from '../ws/yjs.ts';
+import { byUser, rateLimit } from '../middleware/rateLimit.ts';
+import { ExecError, execute, isStubbed } from '../lib/judge0.ts';
+import { publishExecState, readRoomSource } from '../lib/execState.ts';
 
 export const roomsRouter = Router();
 
 roomsRouter.use(requireAuth);
 
 const SUPPORTED_LANGUAGES = ['javascript', 'python', 'cpp', 'java'];
+
+/*
+ * The TRD's non-functional requirement: one execution per user per three
+ * seconds. Execution is the expensive, abusable endpoint — it spends a
+ * third-party quota and runs untrusted code — so it is the one path that gets
+ * a hard limit rather than a generous one.
+ */
+const execLimiter = rateLimit({
+  windowMs: 3_000,
+  max: 1,
+  key: byUser,
+  message: 'Only one run every 3 seconds. Give the last one a moment.',
+});
 
 roomsRouter.post('/', async (req, res) => {
   const { name, language } = (req.body ?? {}) as Record<string, unknown>;
@@ -125,6 +141,73 @@ roomsRouter.patch('/:id/members/:userId', async (req, res) => {
   }
 
   res.json({ room: await serializeRoom(room, callerId) });
+});
+
+/**
+ * Runs the room's current code and shares the result with everyone in it.
+ *
+ * The source is read from the server's own copy of the document rather than
+ * from the request body. Everyone then runs exactly what is on screen, and a
+ * client cannot execute something other than what the room can see.
+ */
+roomsRouter.post('/:id/exec', execLimiter, async (req, res) => {
+  const userId = req.userId as string;
+
+  const found = await loadRoomForMember(req.params.id as string, userId);
+  if (!found) throw new HttpError(404, 'Room not found');
+  if (found.role === 'viewer') {
+    throw new HttpError(403, 'Viewers cannot run code');
+  }
+
+  const { room } = found;
+  const roomId = room.id as string;
+  const source = await readRoomSource(roomId);
+
+  // Tell the room a run has started before blocking on the execution service,
+  // so every peer sees it immediately rather than after the result arrives.
+  publishExecState(roomId, {
+    status: 'running',
+    runBy: userId,
+    startedAt: Date.now(),
+  });
+
+  try {
+    const outcome = await execute(room.language, source);
+
+    // Judge0's own status ("Accepted", "Compilation Error", ...) is kept
+    // separate: `status` here is the phase the UI switches on, and spreading
+    // the outcome directly would overwrite it.
+    const { status: execStatus, ...rest } = outcome;
+
+    publishExecState(roomId, {
+      status: 'done',
+      runBy: userId,
+      finishedAt: Date.now(),
+      execStatus,
+      ...rest,
+    });
+
+    touchRoom(roomId);
+    res.json({ result: outcome });
+  } catch (err) {
+    const message =
+      err instanceof ExecError ? err.message : 'Execution failed unexpectedly';
+
+    publishExecState(roomId, {
+      status: 'error',
+      runBy: userId,
+      finishedAt: Date.now(),
+      message,
+    });
+
+    if (!(err instanceof ExecError)) console.error('[exec] unexpected failure', err);
+    throw new HttpError(err instanceof ExecError ? err.status : 500, message);
+  }
+});
+
+/** Whether the server can actually run code, so the UI can say so up front. */
+roomsRouter.get('/meta/exec', (_req, res) => {
+  res.json({ stubbed: isStubbed(), languages: SUPPORTED_LANGUAGES });
 });
 
 roomsRouter.get('/:id', async (req, res) => {

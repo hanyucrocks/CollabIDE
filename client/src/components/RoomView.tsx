@@ -4,6 +4,8 @@ import { api, type Room } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { colorForUser, useCollabDoc, type Identity } from '../lib/useCollabDoc.ts';
 import { CodeEditor } from './CodeEditor.tsx';
+import { OutputPanel } from './OutputPanel.tsx';
+import { useExecState } from '../lib/useExecState.ts';
 import { useOnlinePeers } from '../lib/useOnlinePeers.ts';
 
 export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => void }) {
@@ -19,6 +21,25 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
   const { ydoc, provider, status, synced } = useCollabDoc(roomId, tokenVersion, identity);
   const peers = useOnlinePeers(provider);
   const [copied, setCopied] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const exec = useExecState(ydoc);
+
+  const canRun = room?.role === 'owner' || room?.role === 'editor';
+
+  const run = async () => {
+    setRunError(null);
+    setRunning(true);
+    try {
+      await api.runCode(roomId);
+    } catch (err) {
+      // A 429 from the run limiter is the common case and is not an error
+      // worth alarming anyone about — show what the server said.
+      setRunError(err instanceof Error ? err.message : 'Could not run the code');
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const copyInvite = () => {
     if (!room?.inviteToken) return;
@@ -85,6 +106,11 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
             {status}
             {status === 'connected' && !synced ? ' · syncing' : ''}
           </span>
+          {canRun && (
+            <button type="button" onClick={() => void run()} disabled={running}>
+              {running || exec.status === 'running' ? 'Running…' : 'Run'}
+            </button>
+          )}
           <button type="button" className="secondary" onClick={onLeave}>
             Leave
           </button>
@@ -106,12 +132,16 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
         </div>
       )}
 
+      {runError && <p className="error">{runError}</p>}
+
       <CodeEditor
         ydoc={ydoc}
         provider={provider}
         language={room?.language ?? 'javascript'}
         readOnly={room?.role === 'viewer'}
       />
+
+      <OutputPanel state={exec} />
 
       {room && (
         <div className="card">

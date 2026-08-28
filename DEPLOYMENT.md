@@ -155,12 +155,28 @@ for a live interview. Railway has no sleep and no free tier; that is the trade.
 | `VITE_API_URL` | yes | no trailing slash |
 | `VITE_WS_URL` | no | derived from `VITE_API_URL`; leave unset |
 
-## Not yet handled
+## Enabling code execution
 
-- **No rate limiting.** Signup and login are open. Week 3 work, and it matters
-  more once there is a public URL.
+Execution is stubbed until `JUDGE0_API_KEY` is set. Subscribe to the free tier
+of [Judge0 CE on RapidAPI](https://rapidapi.com/judge0-official/api/judge0-ce)
+and add the key on **Render**:
+
+| Variable | Value |
+| --- | --- |
+| `JUDGE0_API_KEY` | your RapidAPI key |
+
+Set it on the API service, never as a `VITE_*` variable. Anything with that
+prefix is compiled into the browser bundle, where it is readable by every
+visitor. The client asks *this* API to run code; only the server talks to
+Judge0.
+
+Until the key is set, runs return a labelled stub result rather than failing,
+so the rest of the app can be demonstrated without one.
+
+## Not yet handled
 - **The access token travels as a WebSocket query parameter**, because browsers
   cannot set headers on a WS handshake. Query strings are prone to appearing in
   proxy logs. The token is short-lived, which limits the exposure rather than
   removing it.
-- **No CI.** Nothing runs the smoke suite before a deploy.
+- **The rate limiter is in-process.** Correct for one instance; behind several
+  the effective limit multiplies by the instance count.

@@ -190,4 +190,12 @@ export const api = {
 
   getRoom: (id: string) =>
     request<{ room: Room }>(`/api/rooms/${id}`).then((r) => r.room),
+
+  /**
+   * Triggers a run. The result is not taken from this response — it arrives
+   * for every peer through the shared document, so the UI renders from there
+   * and everyone sees the same output at the same time.
+   */
+  runCode: (roomId: string) =>
+    request<{ result: unknown }>(`/api/rooms/${roomId}/exec`, { method: 'POST' }),
 };

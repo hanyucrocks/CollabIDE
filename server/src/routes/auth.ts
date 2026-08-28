@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { UserModel, type UserDoc } from '../models/User.ts';
 import { HttpError } from '../middleware/errors.ts';
 import { requireAuth } from '../middleware/auth.ts';
+import { clientIp, rateLimit } from '../middleware/rateLimit.ts';
 import {
   hashToken,
   signAccessToken,
@@ -11,6 +12,32 @@ import {
 } from '../lib/tokens.ts';
 
 export const authRouter = Router();
+
+/*
+ * Signup and login are the only unauthenticated write paths, and the service
+ * is on a public URL. Without a limit, account creation is unbounded against a
+ * free database tier and login is open to credential stuffing.
+ *
+ * Keyed by IP because there is no user yet. Generous enough that a person
+ * mistyping a password never notices.
+ */
+const authLimiter = rateLimit({
+  // A short, self-healing window rather than a long punitive one. 20 attempts
+  // a minute is negligible against bcrypt for an attacker, while a 15-minute
+  // window turned out to lock out anything legitimately making several
+  // accounts from one address — an office behind one NAT, or a test suite.
+  //
+  // A production deployment fronting real users should add a stricter
+  // signup-specific limit or a challenge; this bounds the damage, it does not
+  // eliminate it.
+  windowMs: 60_000,
+  max: 20,
+  key: clientIp,
+  message: 'Too many attempts from this address. Wait a minute and try again.',
+});
+
+authRouter.post('/signup', authLimiter);
+authRouter.post('/login', authLimiter);
 
 const BCRYPT_ROUNDS = 12;
 // Cap stored refresh tokens so the array can't grow without bound across logins.

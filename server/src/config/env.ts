@@ -36,6 +36,19 @@ export const env = {
   refreshSecret: required('JWT_REFRESH_SECRET'),
   accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m',
   refreshTtl: process.env.REFRESH_TOKEN_TTL ?? '7d',
+
+  /*
+   * Judge0 runs untrusted code in a sandbox with CPU, memory and time limits.
+   * Without a key the server falls back to a stub so local development and CI
+   * work unchanged — the stub is obvious in logs and never claims to have run
+   * anything.
+   *
+   * This is a server-side secret. It must never be exposed to the client:
+   * anything the browser can read, anyone can read.
+   */
+  judge0Url: process.env.JUDGE0_URL ?? 'https://judge0-ce.p.rapidapi.com',
+  judge0ApiKey: process.env.JUDGE0_API_KEY ?? '',
+  judge0Host: process.env.JUDGE0_HOST ?? 'judge0-ce.p.rapidapi.com',
 };
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
