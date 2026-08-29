@@ -36,7 +36,7 @@ otherwise sync directly through `BroadcastChannel`, which means the two-tab test
 would pass with the server stopped. Forcing every update through the socket is
 what makes that test mean anything.
 
-**54 tests drive the real HTTP and WebSocket server** — no mocks. Token rotation
+**59 tests drive the real HTTP and WebSocket server** — no mocks. Token rotation
 and replay rejection, CRDT convergence under simultaneous edits at the same
 offset, reconnection with neither loss nor duplication, snapshot persistence
 across a restart, and role enforcement at the protocol level. CI runs them
@@ -417,6 +417,11 @@ default Oregon region: a peer saw an edit after a median of **303ms**, p90
 
 Deliberate scope boundaries, not surprises.
 
+- **The demo can cold-start.** The API is on a free instance that sleeps after
+  15 minutes idle and takes up to a minute to return. A scheduled workflow
+  pings it every 10 minutes, but GitHub's scheduler runs late under load, so
+  the client detects a slow first request and says the server is waking rather
+  than showing a dead page.
 - **An unclean kill can lose up to 30s of edits.** Snapshots are debounced, and
   `SIGKILL` or a crash skips the shutdown flush. `SIGINT`/`SIGTERM` are handled.
 - **The access token travels as a WebSocket query parameter.** Browsers cannot

@@ -1,0 +1,45 @@
+# Keeps the demo API from sleeping, so a link in a resume or a README does not
+# open onto a minute-long spinner.
+#
+# Render's free tier suspends an instance after 15 minutes with no traffic and
+# takes up to a minute to bring it back. Pinging every 10 minutes stays inside
+# that window with room for GitHub's scheduler to run late.
+#
+# Two things to know before relying on this:
+#
+#  - A free Render account gets 750 instance-hours a month and a month is about
+#    730 hours, so an always-warm service uses nearly the whole allowance. It
+#    only fits while this is the ONLY free service running on the account.
+#  - GitHub disables scheduled workflows in a repository that has seen no
+#    activity for 60 days. Re-enable it from the Actions tab if the demo starts
+#    sleeping again.
+#
+# This narrows the cold-start window; it does not close it. The scheduler is
+# best-effort and can run several minutes late under load, which is why the
+# client also explains a cold start rather than assuming this never misses.
+
+name: Keep warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping the API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check
+        env:
+          # Already public — it is in the README and the deployed client.
+          API_URL: https://collabide-api-sg-5pdb.onrender.com
+        run: |
+          # --max-time is generous because a genuinely cold instance is slow,
+          # and a slow success is exactly the case this job exists to cause.
+          # Retries mean a single blip does not report the demo as down.
+          curl --silent --show-error --fail \
+            --max-time 120 --retry 3 --retry-delay 15 --retry-all-errors \
+            --output /dev/null \
+            --write-out 'health %{http_code} in %{time_total}s\n' \
+            "$API_URL/api/health"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ApiStatus } from './components/ApiStatus.tsx';
 import { AuthPanel } from './components/AuthPanel.tsx';
 import { JoinRoom } from './components/JoinRoom.tsx';
 import { Lobby } from './components/Lobby.tsx';
@@ -52,6 +53,17 @@ function useHashRoute() {
 }
 
 export function App() {
+  return (
+    <>
+      {/* Above the routes, so a cold start is explained on whichever screen
+          the user happened to land on — including an invite link. */}
+      <ApiStatus />
+      <Routed />
+    </>
+  );
+}
+
+function Routed() {
   const { user, loading } = useAuth();
   const { route, openRoom, goToLobby } = useHashRoute();
 
