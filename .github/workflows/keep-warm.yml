@@ -13,6 +13,12 @@
 #  - GitHub disables scheduled workflows in a repository that has seen no
 #    activity for 60 days. Re-enable it from the Actions tab if the demo starts
 #    sleeping again.
+#  - This schedule needs the repository to be PUBLIC. Actions minutes are free
+#    and unmetered on public repositories; on a private one they come out of
+#    2,000 minutes a month, and GitHub bills every job as a full minute however
+#    short it is. At 144 runs a day that is roughly 4,400 minutes -- more than
+#    double the allowance -- so on a private repository this either stops or
+#    bills. Leave it disabled until the repository is public.
 #
 # This narrows the cold-start window; it does not close it. The scheduler is
 # best-effort and can run several minutes late under load, which is why the
