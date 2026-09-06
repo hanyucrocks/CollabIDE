@@ -41,7 +41,10 @@ roomsRouter.post('/', async (req, res) => {
   }
   const lang = typeof language === 'string' ? language : 'javascript';
   if (!SUPPORTED_LANGUAGES.includes(lang)) {
-    throw new HttpError(400, `language must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`);
+    throw new HttpError(
+      400,
+      `language must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`,
+    );
   }
 
   const userId = req.userId as string;
@@ -141,7 +144,9 @@ roomsRouter.patch('/:id/members/:userId', async (req, res) => {
     // otherwise keep the permissions it had when it opened.
     const dropped = disconnectMember(room.id as string, targetId);
     if (dropped) {
-      console.log(`[rooms] closed ${dropped} socket(s) for ${targetId} after role change`);
+      console.log(
+        `[rooms] closed ${dropped} socket(s) for ${targetId} after role change`,
+      );
     }
   }
 

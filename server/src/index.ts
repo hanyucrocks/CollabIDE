@@ -4,7 +4,7 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { docs } from '@y/websocket-server/utils';
 import { env, isAllowedOrigin } from './config/env.ts';
-import { connectDb, dbState, isDbConnected } from './db/connect.ts';
+import { connectDb, dbState } from './db/connect.ts';
 import { authRouter } from './routes/auth.ts';
 import { roomsRouter } from './routes/rooms.ts';
 import { errorHandler, notFound } from './middleware/errors.ts';

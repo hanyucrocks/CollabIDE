@@ -209,7 +209,12 @@ export function enableSnapshotPersistence(): void {
           ydoc.on('update', () => scheduleSave(docName, ydoc));
         });
 
-      states.set(docName, { ready, timer: null, dirtySince: null, warnedOversized: false });
+      states.set(docName, {
+        ready,
+        timer: null,
+        dirtySince: null,
+        warnedOversized: false,
+      });
     },
 
     writeState: async (docName: string, ydoc: WSSharedDoc) => {
@@ -278,7 +283,9 @@ export async function ensureDocLoaded(roomId: string): Promise<void> {
 }
 
 /** Flushes every pending snapshot. Used on graceful shutdown. */
-export async function flushSnapshots(getDoc: (name: string) => Y.Doc | undefined): Promise<void> {
+export async function flushSnapshots(
+  getDoc: (name: string) => Y.Doc | undefined,
+): Promise<void> {
   const pending = [...states.entries()].filter(([, state]) => state.timer !== null);
 
   await Promise.all(

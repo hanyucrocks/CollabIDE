@@ -56,8 +56,20 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: |
+            package-lock.json
             server/package-lock.json
             client/package-lock.json
+
+      # Lint and formatting tooling lives at the repo root and covers both
+      # packages, so the rules cannot drift apart between them.
+      - name: Install root tooling
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
 
       - name: Install server dependencies
         working-directory: server

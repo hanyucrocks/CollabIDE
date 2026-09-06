@@ -37,7 +37,10 @@ async function exchangeCode(code: string, redirectUri: string): Promise<string> 
 
   if (!res.ok) throw new OAuthError(`GitHub rejected the code exchange (${res.status})`);
 
-  const body = (await res.json()) as { access_token?: string; error_description?: string };
+  const body = (await res.json()) as {
+    access_token?: string;
+    error_description?: string;
+  };
   if (!body.access_token) {
     throw new OAuthError(body.error_description ?? 'GitHub returned no access token');
   }
@@ -80,5 +83,9 @@ export async function fetchIdentity(
     email = emails.find((e) => e.primary && e.verified)?.email ?? null;
   }
 
-  return { id: String(profile.id), email: email?.toLowerCase() ?? null, login: profile.login };
+  return {
+    id: String(profile.id),
+    email: email?.toLowerCase() ?? null,
+    login: profile.login,
+  };
 }

@@ -1,7 +1,10 @@
 const DEFAULT_API_URL = 'http://localhost:4000';
 
 /** Base URL of the REST API, without a trailing slash. */
-export const API_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, '');
+export const API_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_API_URL).replace(
+  /\/+$/,
+  '',
+);
 
 /**
  * WebSocket endpoint, derived from the API URL unless explicitly overridden.

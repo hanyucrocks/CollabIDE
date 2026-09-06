@@ -49,6 +49,11 @@ export function useCollabDoc(
   // Keyed on the room alone, so it survives reconnects and Yjs resyncs it
   // rather than rebuilding it. Not destroyed on unmount: a StrictMode remount
   // would otherwise hand the second mount an already-destroyed doc.
+  //
+  // `roomId` is a cache key here, not a value the factory reads — changing
+  // rooms must produce a new document. That is the intent, so the missing-dep
+  // warning is describing the design rather than a bug.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [roomId]);
 
   useEffect(() => {
@@ -65,6 +70,10 @@ export function useCollabDoc(
 
     ws.on('status', (event) => setStatus(event.status));
     ws.on('sync', (isSynced) => setSynced(isSynced));
+    // The provider is an external system created by this effect, which is the
+    // case effects exist for. It has to reach children somehow, and there is
+    // no render-time way to construct a WebSocket connection.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setProvider(ws);
 
     return () => {
@@ -78,6 +87,10 @@ export function useCollabDoc(
   // the next connection, so a reconnect after a long gap still authenticates.
   useEffect(() => {
     const token = getAccessToken();
+    // `provider` is a live WebSocket connection, not React data. Replacing it
+    // to change one param would tear down and rebuild the socket on every
+    // token rotation, which is precisely what this effect exists to avoid.
+    // eslint-disable-next-line react-hooks/immutability
     if (provider && token) provider.params.token = token;
   }, [provider, tokenVersion]);
 

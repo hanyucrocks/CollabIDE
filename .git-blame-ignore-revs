@@ -1,0 +1,9 @@
+# Commits that changed formatting only, never logic.
+#
+# `git blame` skips these automatically once you run:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub's blame view reads this file without any setup.
+
+# Apply Prettier across the tree
+dada9b66645393d3bdc10de32f946e96b7bb1a14

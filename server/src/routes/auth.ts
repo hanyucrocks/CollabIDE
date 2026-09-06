@@ -118,8 +118,7 @@ authRouter.post('/login', async (req, res) => {
    * has no password at all — one created through GitHub. Distinguishing them
    * would leak both which emails have accounts and how each one signs in.
    */
-  const valid =
-    user?.passwordHash && (await bcrypt.compare(password, user.passwordHash));
+  const valid = user?.passwordHash && (await bcrypt.compare(password, user.passwordHash));
 
   if (!valid) {
     throw new HttpError(401, 'Invalid email or password');
