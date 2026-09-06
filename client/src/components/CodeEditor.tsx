@@ -125,6 +125,19 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     };
 
     /*
+     * Note for anyone tempted to drop the delete above: rebuilding the binding
+     * happens to repair the document on its own, because it re-seeds Y.Text
+     * from a model Monaco has already normalised. The e2e suite still passes
+     * with `stripCarriageReturns` commented out, which is how that was found.
+     *
+     * Keep it anyway. That re-seed is a side effect of y-monaco's constructor
+     * rather than a documented guarantee, and it repairs by replacing the
+     * whole text rather than by deleting the characters that are actually
+     * wrong. The explicit delete is the intended mechanism and the one the
+     * unit tests describe; the rebuild is defence in depth behind it.
+     */
+
+    /*
      * `on` plus a manual unsubscribe rather than `once`: lib0 wraps a `once`
      * handler in a closure it does not hand back, so `off` cannot match it and
      * the listener would outlive an editor that unmounted before the first

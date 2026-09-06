@@ -4,3 +4,9 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# Playwright
+/client/test-results/
+/client/playwright-report/
+/client/blob-report/
+/client/.playwright/
