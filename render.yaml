@@ -27,7 +27,7 @@ services:
       # which is only unflagged from 23.6 onwards. An older Node here fails at
       # startup, not at build time.
       - key: NODE_VERSION
-        value: '24'
+        value: "24"
       - key: NODE_ENV
         value: production
       # Generated once by Render and kept across deploys. Rotating either one

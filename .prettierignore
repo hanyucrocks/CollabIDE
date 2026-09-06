@@ -2,3 +2,11 @@ node_modules
 dist
 package-lock.json
 *.docx
+
+# Files a hosting provider parses. A formatter reflowing these changes what
+# Render and Vercel read, for no benefit — quoting and line breaks here are
+# not style choices, they are input to someone else's parser. Keeping them out
+# means a formatting pass can never be the reason a deploy behaves differently.
+render.yaml
+client/vercel.json
+.github/workflows/
