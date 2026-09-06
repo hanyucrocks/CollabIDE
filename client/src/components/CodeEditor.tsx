@@ -5,6 +5,7 @@ import * as monaco from 'monaco-editor/editor/editor.api.js';
 import * as Y from 'yjs';
 import type { WebsocketProvider } from 'y-websocket';
 import { MonacoBinding } from 'y-monaco';
+import { findStrayCarriageReturns, stripCarriageReturns } from '../lib/lineEndings.ts';
 import { configureMonaco, EDITOR_THEME } from '../lib/monacoSetup.ts';
 
 type Props = {
@@ -101,16 +102,6 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     let binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
     let cancelled = false;
 
-    /** Indices of the \r in every \r\n pair — always a line ending. */
-    const findStrays = (): number[] => {
-      const content = ytext.toString();
-      const found: number[] = [];
-      for (let i = 0; i < content.length - 1; i++) {
-        if (content[i] === '\r' && content[i + 1] === '\n') found.push(i);
-      }
-      return found;
-    };
-
     /*
      * Runs once the initial sync has landed, which is the first moment the
      * document's real contents are known — before it, there is nothing to
@@ -124,15 +115,11 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     const normalise = () => {
       if (cancelled) return;
 
-      const strays = findStrays();
       model.setEOL(monaco.editor.EndOfLineSequence.LF);
-      if (!strays.length) return;
+      if (!findStrayCarriageReturns(ytext.toString()).length) return;
 
       binding.destroy();
-      ydoc.transact(() => {
-        // Backwards, so each deletion leaves the earlier indices valid.
-        for (let i = strays.length - 1; i >= 0; i--) ytext.delete(strays[i], 1);
-      });
+      stripCarriageReturns(ytext);
       binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
       model.setEOL(monaco.editor.EndOfLineSequence.LF);
     };
