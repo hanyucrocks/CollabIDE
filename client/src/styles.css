@@ -336,3 +336,23 @@ button.github {
     opacity: 0.8;
   }
 }
+
+/* Placeholder while the editor chunk downloads. Shares .editor's height so
+   the surrounding layout does not shift when Monaco replaces it. */
+.editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+  background: var(--surface);
+}
+
+/* The underlying error message in the render fallback. Useful when reporting a
+   problem, but it is not the part someone needs to read first. */
+.error-detail {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  opacity: 0.75;
+}

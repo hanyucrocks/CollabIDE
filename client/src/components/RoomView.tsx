@@ -1,14 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inviteUrl } from '../lib/invite.ts';
 import { api, type Room, type SnapshotHealth } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { colorForUser, useCollabDoc, type Identity } from '../lib/useCollabDoc.ts';
-import { CodeEditor } from './CodeEditor.tsx';
 import { OutputPanel } from './OutputPanel.tsx';
 import { MemberList } from './MemberList.tsx';
 import { useExecState } from '../lib/useExecState.ts';
 import { useRoomMeta } from '../lib/useRoomMeta.ts';
 import { useOnlinePeers } from '../lib/useOnlinePeers.ts';
+
+/*
+ * Monaco is by far the largest thing the app ships, and only a room needs it.
+ * Importing it statically put the whole editor — plus its language definitions
+ * and y-monaco — in the entry chunk, so the sign-in form waited on code it
+ * would never call.
+ *
+ * The cut is at the component boundary rather than inside CodeEditor, because
+ * `monaco` is used as a value there (editor.create, setModelLanguage,
+ * EndOfLineSequence) and cannot become a type-only import.
+ */
+const CodeEditor = lazy(() =>
+  import('./CodeEditor.tsx').then((m) => ({ default: m.CodeEditor })),
+);
 
 export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => void }) {
   const { user, tokenVersion } = useAuth();
@@ -183,12 +196,19 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
 
       {runError && <p className="error">{runError}</p>}
 
-      <CodeEditor
-        ydoc={ydoc}
-        provider={provider}
-        language={room?.language ?? 'javascript'}
-        readOnly={room?.role === 'viewer'}
-      />
+      {/*
+        The fallback matches the editor's own height so the page does not jump
+        when the chunk lands. A chunk that fails to load throws during render,
+        which the boundary in main.tsx catches.
+      */}
+      <Suspense fallback={<div className="editor editor-loading">Loading editor…</div>}>
+        <CodeEditor
+          ydoc={ydoc}
+          provider={provider}
+          language={room?.language ?? 'javascript'}
+          readOnly={room?.role === 'viewer'}
+        />
+      </Suspense>
 
       <OutputPanel state={exec} />
 
