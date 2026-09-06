@@ -68,6 +68,10 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
 
   useEffect(() => {
     let cancelled = false;
+    // Every setState here runs after awaiting the room fetch, so this loads on
+    // mount rather than cascading a render. The rule cannot see through the
+    // async boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh().catch((err: unknown) => {
       if (!cancelled) {
         setError(err instanceof Error ? err.message : 'Could not load room');

@@ -15,6 +15,10 @@ export function useOnlinePeers(provider: WebsocketProvider | null): Peer[] {
 
   useEffect(() => {
     if (!provider) {
+      // Clearing peers when the connection goes away is synchronising with an
+      // external system, not deriving state. Leaving the last known peers on
+      // screen after a disconnect would be a lie.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPeers([]);
       return;
     }

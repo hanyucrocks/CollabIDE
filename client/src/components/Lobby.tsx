@@ -19,6 +19,10 @@ export function Lobby({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) 
   }, []);
 
   useEffect(() => {
+    // `reload` only calls setState after awaiting the network, so this is a
+    // fetch on mount rather than a synchronous cascade. The rule cannot see
+    // through the async boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
 
