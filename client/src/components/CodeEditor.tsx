@@ -137,11 +137,32 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
       model.setEOL(monaco.editor.EndOfLineSequence.LF);
     };
 
-    if (provider.synced) normalise();
-    else provider.once('sync', normalise);
+    /*
+     * `on` plus a manual unsubscribe rather than `once`: lib0 wraps a `once`
+     * handler in a closure it does not hand back, so `off` cannot match it and
+     * the listener would outlive an editor that unmounted before the first
+     * sync arrived. The provider is longer-lived than this component, so that
+     * leak accumulates across room switches.
+     */
+    let listening = false;
+    const onSync = () => {
+      listening = false;
+      provider.off('sync', onSync);
+      normalise();
+    };
+
+    if (provider.synced) {
+      normalise();
+    } else {
+      provider.on('sync', onSync);
+      listening = true;
+    }
 
     return () => {
       cancelled = true;
+      // Only if it is still attached: lib0 logs a warning for removing a
+      // handler that is already gone, and onSync removes itself when it fires.
+      if (listening) provider.off('sync', onSync);
       binding.destroy();
     };
   }, [ydoc, provider]);
