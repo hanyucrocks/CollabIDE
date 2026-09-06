@@ -3,7 +3,7 @@ function required(name: string): string {
   if (!value || value.startsWith('replace-me')) {
     throw new Error(
       `Missing env var ${name}. Locally, copy server/.env.example to server/.env ` +
-        'and fill it in. In production, set it in the host\'s environment.',
+        "and fill it in. In production, set it in the host's environment.",
     );
   }
   return value;

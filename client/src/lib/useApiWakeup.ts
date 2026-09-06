@@ -40,7 +40,8 @@ export function useApiWakeup(): WakeState {
     const startedAt = Date.now();
 
     const slowTimer = setTimeout(() => {
-      if (!cancelled) setState((current) => (current === 'checking' ? 'waking' : current));
+      if (!cancelled)
+        setState((current) => (current === 'checking' ? 'waking' : current));
     }, SLOW_AFTER_MS);
 
     void (async () => {

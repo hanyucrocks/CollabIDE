@@ -68,7 +68,9 @@ export function AuthPanel({ invited = false }: { invited?: boolean }) {
             </svg>
             Continue with GitHub
           </button>
-          <div className="divider"><span>or</span></div>
+          <div className="divider">
+            <span>or</span>
+          </div>
         </>
       )}
 
@@ -111,7 +113,9 @@ export function AuthPanel({ invited = false }: { invited?: boolean }) {
           setError(null);
         }}
       >
-        {mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Log in'}
+        {mode === 'login'
+          ? 'Need an account? Sign up'
+          : 'Already have an account? Log in'}
       </button>
     </div>
   );

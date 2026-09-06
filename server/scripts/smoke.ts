@@ -119,7 +119,6 @@ function connect(roomId: string, token: string) {
   return { doc, provider, text: doc.getText('code') };
 }
 
-
 /** Polls until a condition holds, or gives up. Returns whether it held. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -285,7 +284,11 @@ async function main() {
       return;
     }
     const { status } = await call('/api/auth/github');
-    assert.equal(status, 501, 'an unconfigured provider should say so, not fail obscurely');
+    assert.equal(
+      status,
+      501,
+      'an unconfigured provider should say so, not fail obscurely',
+    );
   });
 
   await test('an unknown handoff code is refused', async () => {
@@ -402,7 +405,9 @@ async function main() {
 
   await test('a non-member cannot read the room', async () => {
     const mallory = await newUser('mallory');
-    const { status } = await call(`/api/rooms/${room.id}`, { token: mallory.accessToken });
+    const { status } = await call(`/api/rooms/${room.id}`, {
+      token: mallory.accessToken,
+    });
     assert.equal(status, 404);
   });
 
@@ -540,7 +545,7 @@ async function main() {
     assert.equal(status, 404);
   });
 
-  await test('an editor can run the room\'s code', async () => {
+  await test("an editor can run the room's code", async () => {
     const writer = connect(execRoom.id, alice.accessToken);
     try {
       await whenSynced(writer.provider, 'writer');
@@ -631,7 +636,10 @@ async function main() {
     await cooldown();
 
     // alice consumes her window; bob's must be unaffected.
-    await call(`/api/rooms/${execRoom.id}/exec`, { method: 'POST', token: alice.accessToken });
+    await call(`/api/rooms/${execRoom.id}/exec`, {
+      method: 'POST',
+      token: alice.accessToken,
+    });
     const bobRun = await call(`/api/rooms/${execRoom.id}/exec`, {
       method: 'POST',
       token: bob.accessToken,
@@ -700,7 +708,10 @@ async function main() {
       await settle(400);
 
       b.provider.disconnect();
-      assert.ok(await waitFor(() => !b.provider.wsconnected, 3000), 'b should be offline');
+      assert.ok(
+        await waitFor(() => !b.provider.wsconnected, 3000),
+        'b should be offline',
+      );
 
       // Both sides edit while partitioned, so this is a genuine divergence
       // rather than one side simply idling.
@@ -714,14 +725,21 @@ async function main() {
       );
 
       b.provider.connect();
-      assert.ok(await waitFor(() => b.provider.wsconnected, 15_000), 'b should reconnect');
+      assert.ok(
+        await waitFor(() => b.provider.wsconnected, 15_000),
+        'b should reconnect',
+      );
       await settle(1500);
 
       assert.equal(a.text.toString(), b.text.toString(), 'replicas must converge');
 
       const merged = a.text.toString();
       assert.equal(occurrences(merged, 'WHILE_A_ONLINE'), 1, 'no loss, no duplication');
-      assert.equal(occurrences(merged, 'WHILE_B_OFFLINE'), 1, 'offline edit survives once');
+      assert.equal(
+        occurrences(merged, 'WHILE_B_OFFLINE'),
+        1,
+        'offline edit survives once',
+      );
     } finally {
       a.provider.destroy();
       b.provider.destroy();
@@ -854,10 +872,11 @@ async function main() {
   });
 
   await test("the owner's own role cannot be changed", async () => {
-    const { status } = await call(
-      `/api/rooms/${viewRoom.id}/members/${alice.user.id}`,
-      { method: 'PATCH', body: { role: 'viewer' }, token: alice.accessToken },
-    );
+    const { status } = await call(`/api/rooms/${viewRoom.id}/members/${alice.user.id}`, {
+      method: 'PATCH',
+      body: { role: 'viewer' },
+      token: alice.accessToken,
+    });
     assert.equal(status, 400);
   });
 
@@ -1090,11 +1109,13 @@ async function main() {
     const before = (await snapshotFor(persistRoom.id))?.version as number;
     await writeThenLeave('// third pass\n');
 
-    const after = (await waitForValue(
-      () => snapshotFor(persistRoom.id),
-      (row) => ((row?.version as number) ?? 0) > before,
-      20_000,
-    ))?.version as number;
+    const after = (
+      await waitForValue(
+        () => snapshotFor(persistRoom.id),
+        (row) => ((row?.version as number) ?? 0) > before,
+        20_000,
+      )
+    )?.version as number;
 
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
   });
@@ -1120,7 +1141,8 @@ async function main() {
     await settle(1800);
 
     const stored = await waitForValue(
-      () => snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
+      () =>
+        snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
       (row) => row !== null,
       20_000,
     );
@@ -1129,8 +1151,9 @@ async function main() {
     assert.equal(stored.oversized, false);
     assert.equal(stored.compressed, true, 'snapshots should be stored compressed');
 
-    const { snapshot } = (await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken }))
-      .body as Json;
+    const { snapshot } = (
+      await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken })
+    ).body as Json;
     assert.equal(snapshot, null, 'a healthy room should report no snapshot problem');
   });
 
@@ -1150,7 +1173,8 @@ async function main() {
     await settle(2500);
 
     const row = await waitForValue(
-      () => snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
+      () =>
+        snapshots.findOne({ roomId: new mongoose.Types.ObjectId(bigRoom.id as string) }),
       (r) => r?.oversized === true,
       20_000,
     );
@@ -1200,8 +1224,9 @@ async function main() {
   });
 
   await test('the room reports that it is no longer being saved', async () => {
-    const { snapshot } = (await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken }))
-      .body as Json;
+    const { snapshot } = (
+      await call(`/api/rooms/${bigRoom.id}`, { token: alice.accessToken })
+    ).body as Json;
 
     assert.ok(snapshot, 'the room should report a snapshot problem');
     assert.equal(snapshot.oversized, true);
@@ -1323,10 +1348,14 @@ async function main() {
     const rooms = mongoose.connection.collection('rooms');
     const snaps = mongoose.connection.collection('docsnapshots');
 
-    const stale = await users.find({ email: /@collabide\.test$/ }, { projection: { _id: 1 } }).toArray();
+    const stale = await users
+      .find({ email: /@collabide\.test$/ }, { projection: { _id: 1 } })
+      .toArray();
     const ownerIds = stale.map((u) => u._id);
 
-    const staleRooms = await rooms.find({ ownerId: { $in: ownerIds } }, { projection: { _id: 1 } }).toArray();
+    const staleRooms = await rooms
+      .find({ ownerId: { $in: ownerIds } }, { projection: { _id: 1 } })
+      .toArray();
     const roomIds = staleRooms.map((r) => r._id);
 
     const removedSnaps = await snaps.deleteMany({ roomId: { $in: roomIds } });

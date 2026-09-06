@@ -170,9 +170,9 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
           <strong>This document is no longer being saved</strong>
           <p className="muted">
             It has grown to{' '}
-            {(((meta.snapshotBytes ?? snapshot?.bytes) ?? 0) / 1_000_000).toFixed(1)} MB,
-            past what can be stored. Everyone still sees your edits live, but they
-            will not survive a restart
+            {((meta.snapshotBytes ?? snapshot?.bytes ?? 0) / 1_000_000).toFixed(1)} MB,
+            past what can be stored. Everyone still sees your edits live, but they will
+            not survive a restart
             {snapshot?.lastSavedAt
               ? ` — the last saved version is from ${new Date(snapshot.lastSavedAt).toLocaleString()}`
               : ''}
@@ -192,9 +192,7 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
 
       <OutputPanel state={exec} />
 
-      {room && (
-        <MemberList room={room} currentUserId={user?.id} onRoomChange={setRoom} />
-      )}
+      {room && <MemberList room={room} currentUserId={user?.id} onRoomChange={setRoom} />}
     </div>
   );
 }

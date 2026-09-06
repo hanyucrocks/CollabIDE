@@ -19,7 +19,10 @@ function parseRoute(hash: string): Route {
     return { kind: 'room', roomId: hash.slice(ROOM_PREFIX.length) };
   }
   if (hash.startsWith(JOIN_PREFIX)) {
-    return { kind: 'join', inviteToken: decodeURIComponent(hash.slice(JOIN_PREFIX.length)) };
+    return {
+      kind: 'join',
+      inviteToken: decodeURIComponent(hash.slice(JOIN_PREFIX.length)),
+    };
   }
   return { kind: 'lobby' };
 }

@@ -16,8 +16,7 @@ export function ApiStatus() {
       <div className="card warning notice" role="alert">
         <strong>Can't reach the server.</strong>
         <p className="muted">
-          It may be redeploying. Reload in a minute — nothing you have saved is
-          affected.
+          It may be redeploying. Reload in a minute — nothing you have saved is affected.
         </p>
       </div>
     );
@@ -29,9 +28,9 @@ export function ApiStatus() {
         <span className="pulse" aria-hidden="true" /> Waking the server…
       </strong>
       <p className="muted">
-        The free hosting tier sleeps after 15 minutes idle. First load takes up
-        to a minute; everything after it is instant. You can start signing in
-        now — it will go through as soon as the server is up.
+        The free hosting tier sleeps after 15 minutes idle. First load takes up to a
+        minute; everything after it is instant. You can start signing in now — it will go
+        through as soon as the server is up.
       </p>
     </div>
   );

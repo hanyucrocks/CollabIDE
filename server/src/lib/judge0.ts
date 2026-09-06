@@ -130,10 +130,9 @@ async function runOnJudge0(language: string, source: string): Promise<ExecOutcom
 
     await sleep(POLL_INTERVAL_MS);
 
-    const res = await fetch(
-      `${env.judge0Url}/submissions/${token}?base64_encoded=true`,
-      { headers: headers() },
-    );
+    const res = await fetch(`${env.judge0Url}/submissions/${token}?base64_encoded=true`, {
+      headers: headers(),
+    });
     if (!res.ok) continue;
 
     const body = (await res.json()) as {

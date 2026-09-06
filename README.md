@@ -21,7 +21,7 @@ this project is about.
 **The editor came second, deliberately.** Sync was proven against a plain
 `<textarea>` before Monaco went anywhere near it, so a sync bug could not hide
 behind an editor's own buffering. That ordering earned its keep immediately: it
-exposed a Yjs v13/v14 mismatch between client and server that fails *silently* —
+exposed a Yjs v13/v14 mismatch between client and server that fails _silently_ —
 the handshake completes, the client reports `synced: true`, the auth gate
 passes, and no update ever applies. With Monaco already in place that would have
 had three plausible suspects instead of one.
@@ -217,7 +217,7 @@ concurrent refreshes cannot both succeed. Replaying an already-rotated token is
 treated as theft and drops every session for that user.
 
 **WebSocket gate.** The upgrade is handled manually (`noServer: true`) so the JWT
-is verified *before* the connection is accepted. Membership is checked too, not
+is verified _before_ the connection is accepted. Membership is checked too, not
 just token validity — otherwise any logged-in user could sync any room.
 
 **Invites.** A room is shared as a link, `#/join/<inviteToken>`, not as a token
@@ -257,7 +257,7 @@ whenever the editor is merely unfocused, so it reads the same either way. The
 editor container carries `data-readonly` for this reason.
 
 **Execution.** `POST /api/rooms/:id/exec` runs the room's code through Judge0.
-The source is read from the *server's* copy of the document, not from the
+The source is read from the _server's_ copy of the document, not from the
 request body, so everyone runs exactly what is on screen and a client cannot
 execute something the room cannot see. Owners and editors may run; viewers may
 not.
@@ -336,8 +336,8 @@ wait so a long uninterrupted typing run still gets written, on
 last-peer-disconnect, and by a flush on SIGINT/SIGTERM.
 
 Enabling persistence also changes memory behaviour: `@y/websocket-server` only
-evicts a room's document on last-peer-disconnect *when a persistence layer is
-configured*. Before this, every room ever opened stayed resident forever.
+evicts a room's document on last-peer-disconnect _when a persistence layer is
+configured_. Before this, every room ever opened stayed resident forever.
 
 ### Two races this had to close
 
@@ -348,13 +348,13 @@ waiting, and `setupWSConnection` writes sync step 1 immediately. A client could
 therefore finish its initial sync against a still-empty document: the editor
 renders blank, and anything typed in that window is ordered against an empty doc
 rather than against the restored content — so a restored paragraph could end up
-*after* text the user typed "before" it. Fixed by calling `ensureDocLoaded()` in
+_after_ text the user typed "before" it. Fixed by calling `ensureDocLoaded()` in
 the upgrade handler, moving the wait to before the socket is accepted.
 
 **`docs.delete()` runs before the save completes.** The library drops the room
 from its map the instant the last peer leaves, while `writeState` is still in
 flight. A reconnect inside that window — a page reload is exactly this — would
-build a fresh document from the *previous* snapshot and silently lose the edits
+build a fresh document from the _previous_ snapshot and silently lose the edits
 still being written. Fixed by tracking in-flight writes per room and having any
 subsequent load await them.
 
