@@ -417,6 +417,11 @@ default Oregon region: a peer saw an edit after a median of **303ms**, p90
 
 Deliberate scope boundaries, not surprises.
 
+- **Undo is per-user, and Monaco's own undo is displaced.** Ctrl+Z reverses
+  only your edits, via a `Y.UndoManager`. That is the correct behaviour in a
+  shared document, but it means Monaco's editor-level undo — which would also
+  cover things like a find-and-replace as one step — is no longer what the key
+  does.
 - **The demo can cold-start.** The API is on a free instance that sleeps after
   15 minutes idle and takes up to a minute to return. A scheduled workflow
   pings it every 10 minutes, but GitHub's scheduler runs late under load, so

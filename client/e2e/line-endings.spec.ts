@@ -141,6 +141,58 @@ test.describe('line endings', () => {
     expect(peer!.text.toString()).toBe('alpha\n-beta\ngamma');
   });
 
+  /*
+   * Undo used to be Monaco's own stack running against a shared model. Monaco
+   * only records edits that came through pushEditOperations — local typing —
+   * while y-monaco applies remote changes with applyEdits, which never touches
+   * the command manager. So after a peer edited above your cursor, Ctrl+Z
+   * applied inverse edits at stale offsets, and y-monaco pushed the result
+   * back into the document: one person's undo corrupted the file for everyone.
+   */
+  test('undo reverses only your own edit, not a peer edit above it', async ({ page }) => {
+    const owner = await newUser('undoowner');
+    const room = await createRoom(owner, 'Undo isolation');
+
+    peer = await connectPeer(room.id, owner);
+    peer.text.insert(0, 'first\nsecond\nthird');
+
+    await signIn(page, owner);
+    await openRoom(page, room.id);
+
+    // The browser types on the last line.
+    await placeCaretAtLineStart(page, 3);
+    await page.keyboard.type('MINE');
+    await waitFor(
+      () => peer!.text.toString().includes('MINE'),
+      'the local edit to reach the peer',
+      15_000,
+    );
+
+    // The peer then inserts *above* it, which is what shifts every offset the
+    // browser's editor had recorded.
+    peer.text.insert(0, 'PEER\n');
+    await waitFor(
+      () => peer!.text.toString().startsWith('PEER'),
+      'the peer edit to be in the document',
+      15_000,
+    );
+    // Let it land in the browser before undoing, or there is nothing to be
+    // wrong about.
+    await page.waitForTimeout(1500);
+
+    await page.locator('.monaco-editor').click();
+    await page.keyboard.press('ControlOrMeta+z');
+
+    await waitFor(
+      () => !peer!.text.toString().includes('MINE'),
+      'the local edit to be undone',
+      15_000,
+    );
+
+    // The peer's line survives, and nothing else moved.
+    expect(peer!.text.toString()).toBe('PEER\nfirst\nsecond\nthird');
+  });
+
   test('a viewer cannot write, however the editor looks', async ({ page }) => {
     const owner = await newUser('vowner');
     const room = await createRoom(owner, 'Viewer enforcement');
