@@ -411,6 +411,102 @@ async function main() {
     assert.equal(status, 404);
   });
 
+  console.log('\nInvite link rotation');
+
+  {
+    const rotateRoom = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Rotatable', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    const originalToken = rotateRoom.inviteToken as string;
+    const rotatePath = `/api/rooms/${rotateRoom.id as string}/invite/rotate`;
+    let rotatedToken = '';
+
+    await test('a non-member cannot rotate, and cannot learn the room exists', async () => {
+      const stranger = await newUser('rotstranger');
+      const { status } = await call(rotatePath, {
+        method: 'POST',
+        token: stranger.accessToken,
+      });
+      // 404 not 403: the same answer a missing room gives, so ids cannot be
+      // probed for existence.
+      assert.equal(status, 404);
+    });
+
+    await test('a member who is not the owner cannot rotate', async () => {
+      const member = await newUser('rotmember');
+      await call('/api/rooms/join', {
+        method: 'POST',
+        body: { inviteToken: originalToken },
+        token: member.accessToken,
+      });
+
+      const { status } = await call(rotatePath, {
+        method: 'POST',
+        token: member.accessToken,
+      });
+      assert.equal(status, 403);
+    });
+
+    await test('the owner gets a new token, different from the old one', async () => {
+      const { status, body } = await call(rotatePath, {
+        method: 'POST',
+        token: alice.accessToken,
+      });
+      assert.equal(status, 200);
+
+      rotatedToken = body.room.inviteToken as string;
+      assert.ok(rotatedToken, 'the owner must receive the new token');
+      assert.notEqual(rotatedToken, originalToken);
+    });
+
+    await test('the old link no longer admits anyone', async () => {
+      const latecomer = await newUser('latecomer');
+      const { status } = await call('/api/rooms/join', {
+        method: 'POST',
+        body: { inviteToken: originalToken },
+        token: latecomer.accessToken,
+      });
+      assert.equal(status, 404);
+    });
+
+    await test('the new link works', async () => {
+      const invited = await newUser('rotinvited');
+      const { status, body } = await call('/api/rooms/join', {
+        method: 'POST',
+        body: { inviteToken: rotatedToken },
+        token: invited.accessToken,
+      });
+      assert.equal(status, 200);
+      assert.equal(body.room.role, 'editor');
+      assert.equal(
+        body.room.inviteToken,
+        undefined,
+        'a non-owner must not receive the rotated token either',
+      );
+    });
+
+    await test('members who joined before the rotation keep their access', async () => {
+      // The member from the earlier test joined on the original token. Rotating
+      // invalidates the link, not the membership it already granted.
+      const members = (
+        await call(`/api/rooms/${rotateRoom.id as string}`, {
+          token: alice.accessToken,
+        })
+      ).body.room.members as Json[];
+
+      const emails = members.map((m) => m.email as string);
+      assert.ok(
+        emails.some((email) => email.startsWith('rotmember-')),
+        'the pre-rotation member should still be listed',
+      );
+    });
+  }
+
   console.log('\nMilestone 4 — WebSocket auth gate');
 
   const wsAttempt = (url: string) =>

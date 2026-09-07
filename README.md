@@ -434,7 +434,6 @@ Deliberate scope boundaries, not surprises.
   suite, but client-side logic — `lib/invite.ts`, the caret and cursor handling
   in `CodeEditor.tsx` — is only verified by driving a browser. Worth adding
   Vitest before that logic grows.
-- **An invite link cannot be rotated** from the UI, though the schema allows it.
 - **A blocked viewer write is dropped silently.** The viewer's own replica keeps
   the local edit until it reconnects and resyncs. Since their editor is
   read-only this needs a deliberate effort to reach, but the server does not

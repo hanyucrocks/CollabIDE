@@ -38,6 +38,8 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
   const peers = useOnlinePeers(provider);
   const [copied, setCopied] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const exec = useExecState(ydoc);
   const meta = useRoomMeta(ydoc);
@@ -55,6 +57,31 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
       setRunError(err instanceof Error ? err.message : 'Could not run the code');
     } finally {
       setRunning(false);
+    }
+  };
+
+  /*
+   * Confirmed, because it cannot be undone and it breaks a link that may
+   * already be in someone's inbox. The old token is gone the moment this
+   * returns.
+   */
+  const rotateInvite = async () => {
+    const ok = window.confirm(
+      'Replace the invite link?\n\n' +
+        'The current link stops working immediately. Anyone already in the room keeps ' +
+        'their access — but you will need to send the new link to anyone still joining.',
+    );
+    if (!ok) return;
+
+    setRotating(true);
+    setRotateError(null);
+    try {
+      setRoom(await api.rotateInvite(roomId));
+      setCopied(false);
+    } catch (err) {
+      setRotateError(err instanceof Error ? err.message : 'Could not rotate the link');
+    } finally {
+      setRotating(false);
     }
   };
 
@@ -175,6 +202,15 @@ export function RoomView({ roomId, onLeave }: { roomId: string; onLeave: () => v
           <button type="button" className="secondary" onClick={copyInvite}>
             {copied ? 'Copied' : 'Copy link'}
           </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void rotateInvite()}
+            disabled={rotating}
+          >
+            {rotating ? 'Replacing…' : 'Replace link'}
+          </button>
+          {rotateError && <p className="error">{rotateError}</p>}
         </div>
       )}
 

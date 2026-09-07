@@ -242,6 +242,15 @@ export const api = {
   getRoom: (id: string) =>
     request<{ room: Room; snapshot: SnapshotHealth | null }>(`/api/rooms/${id}`),
 
+  /**
+   * Owner-only. Issues a new invite link and invalidates the old one.
+   * Existing members keep their access; only the link stops working.
+   */
+  rotateInvite: (roomId: string) =>
+    request<{ room: Room }>(`/api/rooms/${roomId}/invite/rotate`, {
+      method: 'POST',
+    }).then((r) => r.room),
+
   /** Owner-only. Moves a member between editor and viewer. */
   setMemberRole: (roomId: string, userId: string, role: 'editor' | 'viewer') =>
     request<{ room: Room }>(`/api/rooms/${roomId}/members/${userId}`, {

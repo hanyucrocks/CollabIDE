@@ -154,6 +154,38 @@ roomsRouter.patch('/:id/members/:userId', async (req, res) => {
 });
 
 /**
+ * Owner-only. Replaces the room's invite token, invalidating the old link.
+ *
+ * The schema has always kept `inviteToken` separate from `_id` so it could be
+ * rotated; until now nothing could. A link that has been shared once cannot be
+ * unshared, so without this the only remedy for a leaked invite was to abandon
+ * the room and copy its contents elsewhere.
+ *
+ * Existing members are unaffected: the token is only read by `POST /join`, and
+ * membership is already recorded on the room. So there are no sockets to
+ * disconnect — nobody loses access, the link simply stops admitting new people.
+ */
+roomsRouter.post('/:id/invite/rotate', async (req, res) => {
+  const callerId = req.userId as string;
+
+  const found = await loadRoomForMember(req.params.id, callerId);
+  if (!found) throw new HttpError(404, 'Room not found');
+  if (found.role !== 'owner') {
+    throw new HttpError(403, 'Only the room owner can rotate the invite link');
+  }
+
+  const { room } = found;
+  room.inviteToken = newInviteToken();
+  await room.save();
+
+  console.log(`[rooms] ${callerId} rotated the invite link for ${room.id as string}`);
+
+  // serializeRoom returns inviteToken to owners only, so the new one reaches
+  // the caller and nobody else.
+  res.json({ room: await serializeRoom(room, callerId) });
+});
+
+/**
  * Runs the room's current code and shares the result with everyone in it.
  *
  * The source is read from the server's own copy of the document rather than
