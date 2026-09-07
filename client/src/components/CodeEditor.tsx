@@ -103,6 +103,32 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
     let cancelled = false;
 
     /*
+     * Undo has to go through Yjs, not Monaco.
+     *
+     * Monaco's own undo stack only records edits that went through
+     * pushEditOperations — i.e. local typing. y-monaco applies remote changes
+     * with applyEdits, which never touches the command manager, so Monaco's
+     * stack neither records them nor adjusts the offsets it has already
+     * recorded. After a peer edits above your cursor, Ctrl+Z therefore applies
+     * inverse edits at stale positions; and because that lands as a model
+     * change, y-monaco pushes it straight back into the document. One person's
+     * undo corrupts the file for everyone.
+     *
+     * A Y.UndoManager reverses only this client's own changes, expressed in
+     * document terms, so it stays correct however much the rest of the
+     * document has moved underneath.
+     *
+     * trackedOrigins holds the binding *object*: y-monaco transacts with
+     * `this` as the origin, not a string. Anything else — a remote update, or
+     * the line-endings repair above, which transacts with no origin — is
+     * deliberately not tracked, so Ctrl+Z cannot undo a peer's work or a
+     * corruption repair.
+     */
+    const undoManager = new Y.UndoManager(ytext, {
+      trackedOrigins: new Set([binding]),
+    });
+
+    /*
      * Runs once the initial sync has landed, which is the first moment the
      * document's real contents are known — before it, there is nothing to
      * inspect and the check would pass vacuously.
@@ -122,6 +148,13 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
       stripCarriageReturns(ytext);
       binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
       model.setEOL(monaco.editor.EndOfLineSequence.LF);
+
+      // The manager tracks the binding by identity, so the rebuilt one has to
+      // be swapped in or nothing typed afterwards would be undoable. Mutating
+      // the set rather than recreating the manager keeps any history from
+      // before the repair.
+      undoManager.trackedOrigins.clear();
+      undoManager.trackedOrigins.add(binding);
     };
 
     /*
@@ -136,6 +169,42 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
      * wrong. The explicit delete is the intended mechanism and the one the
      * unit tests describe; the rebuild is defence in depth behind it.
      */
+
+    /*
+     * Take over the undo keys.
+     *
+     * `addAction` and `addCommand` both lose this fight: undo and redo are
+     * core Monaco commands and their keybindings win over a registered
+     * action's, so the handler simply never runs. That was verified rather
+     * than assumed — with an action bound, the UndoManager had the edit on its
+     * stack and the action's `run` was never called.
+     *
+     * Intercepting the keydown and cancelling it is what actually displaces
+     * the built-in, and `onKeyDown` returns a disposable so it goes away with
+     * the binding.
+     */
+    const keys = editor.onKeyDown((event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.keyCode !== monaco.KeyCode.KeyZ) {
+        return;
+      }
+
+      // Stop Monaco's own undo from also running against the shared model.
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.shiftKey) undoManager.redo();
+      else undoManager.undo();
+    });
+
+    // Ctrl+Y is the other redo convention on Windows and Linux.
+    const redoKey = editor.onKeyDown((event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.keyCode !== monaco.KeyCode.KeyY) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      undoManager.redo();
+    });
 
     /*
      * `on` plus a manual unsubscribe rather than `once`: lib0 wraps a `once`
@@ -163,6 +232,12 @@ export function CodeEditor({ ydoc, provider, language, readOnly = false }: Props
       // Only if it is still attached: lib0 logs a warning for removing a
       // handler that is already gone, and onSync removes itself when it fires.
       if (listening) provider.off('sync', onSync);
+      keys.dispose();
+      redoKey.dispose();
+      // The Y.Doc deliberately outlives this component (see useCollabDoc), so
+      // an UndoManager left attached to it would accumulate across every room
+      // the user opens.
+      undoManager.destroy();
       binding.destroy();
     };
   }, [ydoc, provider]);
