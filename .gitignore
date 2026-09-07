@@ -10,3 +10,8 @@ dist/
 /client/playwright-report/
 /client/blob-report/
 /client/.playwright/
+
+# Playwright output. `test-results/` also appears under server/ if the suite is
+# ever run from the wrong directory, so this is deliberately unanchored.
+test-results/
+playwright-report/
