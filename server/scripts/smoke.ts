@@ -1216,6 +1216,110 @@ async function main() {
     assert.ok(after > before, `version should advance (${before} -> ${after})`);
   });
 
+  console.log('\nSnapshot merge under a lost write race');
+
+  /*
+   * The failure this guards against needs two server instances holding one
+   * room, which cannot be run here. What can be reproduced is the state such a
+   * race leaves behind: a save whose cached version is stale because something
+   * else wrote the row in the meantime.
+   *
+   * Writing the row directly, with a bumped version and content this server has
+   * never seen, is exactly what a sibling instance would have done. The old
+   * unconditional overwrite would discard that content. Merge-on-write has to
+   * keep both.
+   */
+  {
+    const mergeRoom = (
+      await call('/api/rooms', {
+        method: 'POST',
+        body: { name: 'Merge race', language: 'javascript' },
+        token: alice.accessToken,
+      })
+    ).body.room as Json;
+
+    const roomObjectId = new mongoose.Types.ObjectId(mergeRoom.id as string);
+
+    /** Builds the snapshot row a different instance would have written. */
+    async function writeForeignSnapshot(base: string, addition: string): Promise<number> {
+      const doc = new Y.Doc();
+      doc.getText('code').insert(0, base + addition);
+      const update = Buffer.from(Y.encodeStateAsUpdate(doc));
+
+      const current = (await snapshotFor(mergeRoom.id as string))?.version as number;
+      const version = (current ?? 0) + 4; // deliberately ahead
+
+      await snapshots.updateOne(
+        { roomId: roomObjectId },
+        {
+          $set: {
+            yjsState: zlib.gzipSync(update),
+            compressed: true,
+            sizeBytes: update.byteLength,
+            oversized: false,
+            oversizedBytes: 0,
+            version,
+            savedAt: new Date(),
+          },
+        },
+        { upsert: true },
+      );
+      return version;
+    }
+
+    await test('a save that lost the race merges instead of overwriting', async () => {
+      // 1. Establish a snapshot the normal way.
+      const first = connect(mergeRoom.id as string, alice.accessToken);
+      await whenSynced(first.provider, 'merge-first');
+      first.text.insert(0, 'AAA\n');
+      await settle(500);
+      first.provider.destroy();
+      await settle(2000);
+
+      const initial = await waitForValue(
+        () => snapshotFor(mergeRoom.id as string),
+        (row) => decodeSnapshot(row as Json).includes('AAA'),
+        20_000,
+      );
+      assert.ok(initial, 'the first save should have landed');
+
+      // 2. Reopen, so the server loads that row and caches its version.
+      const second = connect(mergeRoom.id as string, alice.accessToken);
+      await whenSynced(second.provider, 'merge-second');
+      assert.ok(second.text.toString().includes('AAA'), 'should restore AAA');
+
+      // 3. Add local content this server has, and the row does not.
+      second.text.insert(second.text.length, 'BBB\n');
+      await settle(500);
+
+      // 4. A sibling instance writes content this server has never seen, and
+      //    moves the version past what the server cached.
+      const foreignVersion = await writeForeignSnapshot('AAA\n', 'CCC\n');
+
+      // 5. Disconnecting makes the server save against a version that no
+      //    longer matches.
+      second.provider.destroy();
+      await settle(2500);
+
+      const row = await waitForValue(
+        () => snapshotFor(mergeRoom.id as string),
+        (r) => ((r?.version as number) ?? 0) > foreignVersion,
+        20_000,
+      );
+      assert.ok(row, 'the retry should have written a new version');
+
+      const text = decodeSnapshot(row as Json);
+      assert.ok(
+        text.includes('BBB'),
+        `the local edit must survive: ${JSON.stringify(text)}`,
+      );
+      assert.ok(
+        text.includes('CCC'),
+        `the other writer's content must survive: ${JSON.stringify(text)}`,
+      );
+    });
+  }
+
   console.log('\nSnapshot size guard');
 
   const bigRoom = (
