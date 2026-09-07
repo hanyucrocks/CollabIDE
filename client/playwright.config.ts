@@ -23,6 +23,18 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+
+  /*
+   * Well past what any of these tests need, because the slow case is not the
+   * test — it is the auth rate limiter.
+   *
+   * Every spec creates accounts, the limiter is per-address at 20 per minute,
+   * and CI runs the smoke suite (which creates a dozen) immediately before
+   * this one. The helper honours Retry-After, but that means a first signup can
+   * legitimately sit out most of a minute, which blew straight through the 30s
+   * default and produced exactly one flaky failure.
+   */
+  timeout: 120_000,
   reporter: process.env.CI ? [['github'], ['list']] : [['list']],
 
   use: {
